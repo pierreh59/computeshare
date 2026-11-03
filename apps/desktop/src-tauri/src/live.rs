@@ -1,4 +1,4 @@
-﻿//! LAI-23 - Stats temps reel du noeud fournisseur.
+//! LAI-23 - Stats temps reel du noeud fournisseur.
 //! Gains estimes, charge GPU, temperature, statut minage.
 
 use serde::Serialize;

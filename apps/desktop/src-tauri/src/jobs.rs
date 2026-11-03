@@ -1,4 +1,4 @@
-﻿//! LAI-22 - File locale de chunks : soumission, execution, historique.
+//! LAI-22 - File locale de chunks : soumission, execution, historique.
 
 use crate::sandbox::{run_chunk, ChunkResult, ChunkSpec};
 use std::sync::{Mutex, OnceLock};

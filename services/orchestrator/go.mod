@@ -1,4 +1,4 @@
-﻿module github.com/pierreh59/computeshare/orchestrator
+module github.com/pierreh59/computeshare/orchestrator
 
 go 1.23
 

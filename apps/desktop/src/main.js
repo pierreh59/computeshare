@@ -1,4 +1,4 @@
-﻿// Ecran fournisseur : stats temps reel + controle du noeud.
+// Ecran fournisseur : stats temps reel + controle du noeud.
 const inv = window.__TAURI__.core.invoke;
 const hw = await inv("detect_hardware");
 const nodeId = "node-" + Math.random().toString(16).slice(2, 8);

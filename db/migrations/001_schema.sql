@@ -1,4 +1,4 @@
-﻿-- ComputeShare - Migration 001 : schema core (LAI-17)
+-- ComputeShare - Migration 001 : schema core (LAI-17)
 -- PostgreSQL 15+
 
 CREATE TABLE gpu_categories (

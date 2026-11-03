@@ -1,4 +1,4 @@
-﻿//! LAI-19 - Detection du materiel.
+//! LAI-19 - Detection du materiel.
 //! GPU + VRAM via NVML (NVIDIA), CPU/RAM via sysinfo.
 
 use serde::Serialize;

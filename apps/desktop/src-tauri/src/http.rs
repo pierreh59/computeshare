@@ -1,4 +1,4 @@
-﻿//! Client HTTP minimal pour le MVP : gateway en HTTP local uniquement.
+//! Client HTTP minimal pour le MVP : gateway en HTTP local uniquement.
 //! Sera remplace par un client avec TLS (ureq) avant la beta.
 
 use std::io::{Read, Write};

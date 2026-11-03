@@ -1,4 +1,4 @@
-﻿//! LAI-21 - Detection d'idle : le minage ne demarre que si la machine
+//! LAI-21 - Detection d'idle : le minage ne demarre que si la machine
 //! est inutilisee, et se coupe automatiquement si un jeu/app lourde demarre.
 
 use serde::Serialize;

@@ -1,4 +1,4 @@
-﻿//! LAI-53 - Client noeud : boucle register / poll chunks / report.
+//! LAI-53 - Client noeud : boucle register / poll chunks / report.
 //! Register periodique (idempotent, sert de heartbeat), claim d'un chunk
 //! seulement si la machine est idle, execution dans le sandbox, remontee
 //! du resultat + checksum SHA-256.

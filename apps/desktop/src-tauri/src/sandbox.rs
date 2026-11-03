@@ -1,4 +1,4 @@
-﻿//! LAI-22 - Sandbox d'execution embarque.
+//! LAI-22 - Sandbox d'execution embarque.
 //! Un chunk client s'execute dans un repertoire isole, sous contraintes :
 //! allowlist de commandes, timeout dur, checksum SHA-256 du resultat.
 

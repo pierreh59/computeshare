@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 // LAI-25 - Chunker : decoupe un job client en chunks assignes aux noeuds.
 

@@ -1,4 +1,4 @@
-﻿//! LAI-20 - Benchmark d'entree standardise.
+//! LAI-20 - Benchmark d'entree standardise.
 //! Mesure un debit de calcul reproductible (hashage SHA-256) pendant que NVML
 //! echantillonne l'etat du GPU. Le score sert a :
 //!   1. calibrer les gains du fournisseur,

@@ -1,4 +1,4 @@
-﻿// ComputeShare desktop - LAI-18/20/21/22/23/53
+// ComputeShare desktop - LAI-18/20/21/22/23/53
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod hw;
