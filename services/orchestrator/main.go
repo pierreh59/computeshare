@@ -22,10 +22,12 @@ func main() {
 	hub := NewHub(registry)
 	pricing := NewPricing(store)
 	wallet := NewWallet(store)
-	chunker := NewChunker(registry, pricing, store, fraud, wallet)
+	billing := NewBilling(store)
+	chunker := NewChunker(registry, pricing, store, fraud, wallet, billing)
 	orgs := NewOrgStore(store)
 	store.LoadAll(registry, pricing, chunker, orgs)
 	store.LoadWallet(wallet)
+	store.LoadBilling(billing)
 	wallet.Start()
 
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -216,11 +218,11 @@ func main() {
 	})
 
 	// LAI-30 : API v1 clients B2B (auth Bearer, cf. api/openapi.yaml).
-	http.HandleFunc("/v1/jobs", v1Submit(orgs, chunker))
+	http.HandleFunc("/v1/jobs", v1Submit(orgs, chunker, billing))
 	http.HandleFunc("/v1/jobs/", func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/status"):
-			v1Status(orgs, chunker).ServeHTTP(w, r)
+			v1Status(orgs, chunker, billing).ServeHTTP(w, r)
 		case strings.HasSuffix(r.URL.Path, "/results"):
 			v1Results(orgs, chunker).ServeHTTP(w, r)
 		case strings.HasSuffix(r.URL.Path, "/cancel"):
@@ -239,6 +241,17 @@ func main() {
 		}
 		http.NotFound(w, r)
 	})
+
+	// Sprint 13 - Console B2B + billing (LAI-31/32).
+	// Console client : formulaire de soumission + suivi live.
+	http.HandleFunc("/console", consolePage)
+	// Solde de credits et rapport d'usage du client authentifie.
+	http.HandleFunc("/v1/balance", v1Balance(orgs, billing))
+	http.HandleFunc("/v1/usage", v1Usage(orgs, billing))
+	// Admin : vue billing, rechargement, remboursement.
+	http.HandleFunc("/admin/billing", adminBilling(billing))
+	http.HandleFunc("/admin/billing/topup", adminBillingTopUp(billing))
+	http.HandleFunc("/admin/billing/refund", adminBillingRefund(billing))
 
 	log.Printf("orchestrator listening on :%s", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {

@@ -35,6 +35,9 @@ type Chunk struct {
 	JobID          string   `json:"job_id"`
 	NodeID         string   `json:"node_id"`
 	Command        string   `json:"command"`
+	// Organisation cliente B2B proprietaire du chunk (vide pour les
+	// soumissions internes). Utilisee par le billing (LAI-32).
+	OrgID          string   `json:"-"`
 	Args           []string `json:"args"`
 	ExpectedOutput string   `json:"expected_output"`
 	TimeoutSecs    uint64   `json:"timeout_secs"`
@@ -60,14 +63,15 @@ type Chunker struct {
 	store   *Store
 	fraud   *Fraud
 	wallet  *Wallet
+	billing *Billing
 	chunks  []*Chunk
 	seq     int
 }
 
 const maxChunkAttempts = 3
 
-func NewChunker(r *Registry, p *Pricing, s *Store, f *Fraud, w *Wallet) *Chunker {
-	c := &Chunker{reg: r, pricing: p, store: s, fraud: f, wallet: w, chunks: make([]*Chunk, 0)}
+func NewChunker(r *Registry, p *Pricing, s *Store, f *Fraud, w *Wallet, b *Billing) *Chunker {
+	c := &Chunker{reg: r, pricing: p, store: s, fraud: f, wallet: w, billing: b, chunks: make([]*Chunk, 0)}
 	go c.rescheduleLoop()
 	return c
 }
@@ -84,7 +88,7 @@ func (c *Chunker) nodeCategory(nodeID string) string {
 
 // Submit decoupe le job en TaskCount chunks, distribues en round-robin
 // sur les noeuds en ligne. Retourne nil si aucun noeud n'est dispo.
-func (c *Chunker) Submit(job Job) []*Chunk {
+func (c *Chunker) Submit(job Job, orgID string) []*Chunk {
 	nodes := c.reg.OnlineNodes()
 	if len(nodes) == 0 || job.TaskCount <= 0 {
 		return nil
@@ -99,6 +103,7 @@ func (c *Chunker) Submit(job Job) []*Chunk {
 			ID:             id,
 			JobID:          job.ID,
 			NodeID:         nodes[i%len(nodes)].ID,
+			OrgID:          orgID,
 			Command:        job.Command,
 			Args:           job.Args,
 			ExpectedOutput: job.OutputName,
@@ -153,6 +158,12 @@ func (c *Chunker) Complete(chunkID, outcome, sha string, durationSecs uint64) bo
 			// LAI-34 : le gain est ecrit au grand livre du vendeur.
 			if outcome == "ok" {
 				c.wallet.CreditPayout(ch.NodeID, ch.PayoutEur, ch.ID)
+			}
+			// LAI-32 : le client B2B est facture a la GPU-heure
+			// reelle (cout = reversement x marge, TVA journalisee).
+			if outcome == "ok" {
+				c.billing.ChargeChunk(ch.OrgID, ch.PayoutEur,
+					float64(durationSecs)/3600.0, ch.ID)
 			}
 			c.store.SaveChunk(ch)
 			return true
@@ -279,7 +290,7 @@ func submitJob(c *Chunker) http.HandlerFunc {
 			http.Error(w, "invalid job", http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, c.Submit(job))
+		writeJSON(w, c.Submit(job, ""))
 	}
 }
 

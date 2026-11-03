@@ -107,8 +107,8 @@ func (s *Store) SaveChunk(ch *Chunk) {
 	_, err := s.db.Exec(`INSERT INTO runtime_chunks
 		(id, job_id, node_id, command, args, expected_output, timeout_secs,
 		 status, result_sha256, price_eur_per_hour, payout_eur,
-		 attempts, zone, assets, duration_secs, sampled, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, now())
+		 attempts, zone, assets, duration_secs, sampled, org_id, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17, now())
 		ON CONFLICT (id) DO UPDATE SET
 		  status=EXCLUDED.status,
 		  result_sha256=EXCLUDED.result_sha256,
@@ -123,7 +123,7 @@ func (s *Store) SaveChunk(ch *Chunk) {
 		ch.TimeoutSecs, ch.Status, nullStr(ch.ResultSHA256),
 		ch.PriceEurPerHour, ch.PayoutEur,
 		ch.Attempts, nullStr(ch.Zone), string(assets),
-		ch.DurationSecs, ch.Sampled)
+		ch.DurationSecs, ch.Sampled, ch.OrgID)
 	if err != nil {
 		log.Printf("store.SaveChunk: %v", err)
 	}
@@ -320,6 +320,74 @@ func (s *Store) LoadWallet(w *Wallet) {
 	}
 }
 
+// SaveBillingEvent ajoute une ecriture au journal de billing (append-only).
+func (s *Store) SaveBillingEvent(e *BillingEvent) {
+	if !s.enabled() {
+		return
+	}
+	_, err := s.db.Exec(`INSERT INTO runtime_billing_events
+		(id, at, org_id, event_type, amount_eur, vat_eur, gpu_hours, ref)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		ON CONFLICT (id) DO NOTHING`,
+		e.Seq, e.At, e.OrgID, e.EventType, e.AmountEur,
+		e.VatEur, e.GpuHours, e.Ref)
+	if err != nil {
+		log.Printf("store.SaveBillingEvent: %v", err)
+	}
+}
+
+// SaveOrgBalance persiste le solde de credits d'une organisation.
+func (s *Store) SaveOrgBalance(orgID string, balanceEur float64) {
+	if !s.enabled() {
+		return
+	}
+	_, err := s.db.Exec(`INSERT INTO runtime_billing_balances (org_id, balance_eur, updated_at)
+		VALUES ($1,$2,now())
+		ON CONFLICT (org_id) DO UPDATE SET
+		  balance_eur=EXCLUDED.balance_eur,
+		  updated_at=now()`,
+		orgID, balanceEur)
+	if err != nil {
+		log.Printf("store.SaveOrgBalance: %v", err)
+	}
+}
+
+// LoadBilling recharge le journal et les soldes de credits au demarrage.
+func (s *Store) LoadBilling(b *Billing) {
+	if !s.enabled() {
+		return
+	}
+	rows, err := s.db.Query(`SELECT id, at, org_id, event_type,
+		amount_eur, vat_eur, gpu_hours, ref
+		FROM runtime_billing_events ORDER BY id`)
+	if err != nil {
+		log.Printf("store.LoadBilling(events): %v", err)
+	} else {
+		for rows.Next() {
+			var e BillingEvent
+			if rows.Scan(&e.Seq, &e.At, &e.OrgID, &e.EventType,
+				&e.AmountEur, &e.VatEur, &e.GpuHours, &e.Ref) == nil {
+				b.RestoreEvent(&e)
+			}
+		}
+		rows.Close()
+	}
+
+	rows, err = s.db.Query(`SELECT org_id, balance_eur FROM runtime_billing_balances`)
+	if err != nil {
+		log.Printf("store.LoadBilling(balances): %v", err)
+	} else {
+		for rows.Next() {
+			var orgID string
+			var balance float64
+			if rows.Scan(&orgID, &balance) == nil {
+				b.RestoreBalance(orgID, balance)
+			}
+		}
+		rows.Close()
+	}
+}
+
 // LoadAll recharge l'etat au demarrage : prix courants, noeuds connus,
 // organisations clientes, chunks non termines.
 func (s *Store) LoadAll(reg *Registry, pricing *Pricing, chunker *Chunker, orgs *OrgStore) {
@@ -378,19 +446,19 @@ func (s *Store) LoadAll(reg *Registry, pricing *Pricing, chunker *Chunker, orgs 
 	// 4. Chunks non termines (running -> queued, re-claimables).
 	rows, err = s.db.Query(`SELECT id, job_id, node_id, command, args,
 		expected_output, timeout_secs, price_eur_per_hour,
-		attempts, zone, assets
+		attempts, zone, assets, org_id
 		FROM runtime_chunks WHERE status IN ('queued','running')`)
 	if err != nil {
 		log.Printf("store.LoadAll(chunks): %v", err)
 	} else {
 		for rows.Next() {
-			var id, jobID, nodeID, cmd, argsJSON, output string
+			var id, jobID, nodeID, cmd, argsJSON, output, orgID string
 			var timeout, price float64
 			var attempts int
 			var zone sql.NullString
 			var assetsJSON string
 			if rows.Scan(&id, &jobID, &nodeID, &cmd, &argsJSON, &output,
-				&timeout, &price, &attempts, &zone, &assetsJSON) == nil {
+				&timeout, &price, &attempts, &zone, &assetsJSON, &orgID) == nil {
 				var args, assets []string
 				if json.Unmarshal([]byte(argsJSON), &args) != nil {
 					args = nil
@@ -400,6 +468,7 @@ func (s *Store) LoadAll(reg *Registry, pricing *Pricing, chunker *Chunker, orgs 
 				}
 				chunker.Restore(&Chunk{
 					ID: id, JobID: jobID, NodeID: nodeID,
+					OrgID:          orgID,
 					Command: cmd, Args: args,
 					ExpectedOutput:  output,
 					TimeoutSecs:     uint64(timeout),

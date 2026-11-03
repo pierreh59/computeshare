@@ -10,10 +10,16 @@ import (
 )
 
 // POST /v1/jobs : soumet un job, decoupe en chunks par le chunker.
-func v1Submit(orgs *OrgStore, c *Chunker) http.HandlerFunc {
+// LAI-32 : refused si l'organisation n'a plus de credits prepayes.
+func v1Submit(orgs *OrgStore, c *Chunker, b *Billing) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if orgs.Authenticate(r) == nil {
+		org := orgs.Authenticate(r)
+		if org == nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if !b.HasCredits(org.ID) {
+			http.Error(w, "insufficient credits", http.StatusPaymentRequired)
 			return
 		}
 		var job Job
@@ -21,7 +27,7 @@ func v1Submit(orgs *OrgStore, c *Chunker) http.HandlerFunc {
 			http.Error(w, "invalid job", http.StatusBadRequest)
 			return
 		}
-		chunks := c.Submit(job)
+		chunks := c.Submit(job, org.ID)
 		if chunks == nil {
 			http.Error(w, "no node available", http.StatusServiceUnavailable)
 			return
@@ -44,10 +50,12 @@ func jobIDFrom(path, action string) string {
 	return rest
 }
 
-// GET /v1/jobs/<id>/status : avancement d'un job.
-func v1Status(orgs *OrgStore, c *Chunker) http.HandlerFunc {
+// GET /v1/jobs/<id>/status : avancement d'un job, cout reel compris
+// (LAI-31 : la console affiche le cout et l'economie vs AWS).
+func v1Status(orgs *OrgStore, c *Chunker, b *Billing) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if orgs.Authenticate(r) == nil {
+		org := orgs.Authenticate(r)
+		if org == nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -66,10 +74,15 @@ func v1Status(orgs *OrgStore, c *Chunker) http.HandlerFunc {
 		if total > 0 && finished == total {
 			status = "completed"
 		}
+		costEur, vatEur, gpuHours := b.JobCost(org.ID, jobID)
 		writeJSON(w, map[string]interface{}{
-			"job_id": jobID,
-			"status": status,
-			"chunks": st,
+			"job_id":      jobID,
+			"status":      status,
+			"chunks":      st,
+			"cost_eur":    costEur,
+			"vat_eur":     vatEur,
+			"gpu_hours":   gpuHours,
+			"aws_equiv_eur": gpuHours * awsCompareEurPerHour,
 		})
 	}
 }
