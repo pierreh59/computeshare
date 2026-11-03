@@ -59,14 +59,15 @@ type Chunker struct {
 	pricing *Pricing
 	store   *Store
 	fraud   *Fraud
+	wallet  *Wallet
 	chunks  []*Chunk
 	seq     int
 }
 
 const maxChunkAttempts = 3
 
-func NewChunker(r *Registry, p *Pricing, s *Store, f *Fraud) *Chunker {
-	c := &Chunker{reg: r, pricing: p, store: s, fraud: f, chunks: make([]*Chunk, 0)}
+func NewChunker(r *Registry, p *Pricing, s *Store, f *Fraud, w *Wallet) *Chunker {
+	c := &Chunker{reg: r, pricing: p, store: s, fraud: f, wallet: w, chunks: make([]*Chunk, 0)}
 	go c.rescheduleLoop()
 	return c
 }
@@ -149,6 +150,10 @@ func (c *Chunker) Complete(chunkID, outcome, sha string, durationSecs uint64) bo
 			// LAI-43/44 : sampling et detection d'execution ralentie
 			// (logique detaillee dans fraud.go).
 			c.fraudCheck(ch, outcome)
+			// LAI-34 : le gain est ecrit au grand livre du vendeur.
+			if outcome == "ok" {
+				c.wallet.CreditPayout(ch.NodeID, ch.PayoutEur, ch.ID)
+			}
 			c.store.SaveChunk(ch)
 			return true
 		}

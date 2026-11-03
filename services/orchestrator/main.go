@@ -21,9 +21,12 @@ func main() {
 	registry := NewRegistry(store, fraud)
 	hub := NewHub(registry)
 	pricing := NewPricing(store)
-	chunker := NewChunker(registry, pricing, store, fraud)
+	wallet := NewWallet(store)
+	chunker := NewChunker(registry, pricing, store, fraud, wallet)
 	orgs := NewOrgStore(store)
 	store.LoadAll(registry, pricing, chunker, orgs)
+	store.LoadWallet(wallet)
+	wallet.Start()
 
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "ok")
@@ -98,6 +101,88 @@ func main() {
 			return
 		}
 		writeJSON(w, fraud.Alerts())
+	})
+
+	// Sprint 12 - Wallet vendeur (LAI-34/35/36).
+	// Solde + historique du vendeur.
+	http.HandleFunc("/wallet", walletBalance(wallet))
+	// Simulation de retrait : frais affiches AVANT confirmation (LAI-35).
+	http.HandleFunc("/wallet/quote", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		walletQuote(wallet).ServeHTTP(w, r)
+	})
+	// Demande de retrait (bloquee si KYC non approuve, LAI-36).
+	http.HandleFunc("/wallet/withdraw", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		walletWithdraw(wallet).ServeHTTP(w, r)
+	})
+	// Admin : liste des retraits + passage en traite/echoue.
+	http.HandleFunc("/admin/withdrawals", func(w http.ResponseWriter, r *http.Request) {
+		if !requireAdmin(r) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		switch r.Method {
+		case "GET":
+			nodeID := r.URL.Query().Get("node_id")
+			writeJSON(w, wallet.Withdrawals(nodeID))
+		case "POST":
+			var req struct {
+				ID     string `json:"id"`
+				Status string `json:"status"` // processed | failed
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
+				http.Error(w, "invalid", http.StatusBadRequest)
+				return
+			}
+			if err := wallet.ProcessWithdrawal(req.ID, req.Status); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			writeJSON(w, map[string]string{"id": req.ID, "status": req.Status})
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	// Admin : pilotage du KYC vendeur (LAI-36).
+	http.HandleFunc("/admin/kyc", func(w http.ResponseWriter, r *http.Request) {
+		if !requireAdmin(r) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		switch r.Method {
+		case "GET":
+			nodeID := r.URL.Query().Get("node_id")
+			writeJSON(w, map[string]string{
+				"node_id": nodeID,
+				"kyc":     wallet.KYCStatus(nodeID),
+			})
+		case "POST":
+			var req struct {
+				NodeID string `json:"node_id"`
+				Status string `json:"status"` // none | pending | approved | rejected
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.NodeID == "" {
+				http.Error(w, "invalid", http.StatusBadRequest)
+				return
+			}
+			if err := wallet.SetKYC(req.NodeID, req.Status); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			writeJSON(w, map[string]string{
+				"node_id": req.NodeID,
+				"kyc":     req.Status,
+			})
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
 	})
 
 	// LAI-29 : creation d'une organisation cliente (admin only).

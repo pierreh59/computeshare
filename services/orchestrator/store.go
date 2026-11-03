@@ -189,6 +189,127 @@ func (s *Store) GetAsset(id string) *Asset {
 	return &a
 }
 
+// --- Sprint 12 : wallet & ledger (LAI-34/35/36) ---
+
+// SaveLedger ajoute une ecriture au grand livre (append-only, LAI-34).
+func (s *Store) SaveLedger(e *LedgerEntry) {
+	if !s.enabled() {
+		return
+	}
+	_, err := s.db.Exec(`INSERT INTO runtime_ledger
+		(id, at, node_id, entry_type, amount_eur, ref)
+		VALUES ($1,$2,$3,$4,$5,$6)
+		ON CONFLICT (id) DO NOTHING`,
+		e.Seq, e.At, e.NodeID, e.EntryType, e.AmountEur, e.Ref)
+	if err != nil {
+		log.Printf("store.SaveLedger: %v", err)
+	}
+}
+
+// SaveWithdrawal insere ou rafraichit une demande de retrait (LAI-35).
+func (s *Store) SaveWithdrawal(wd *Withdrawal) {
+	if !s.enabled() {
+		return
+	}
+	_, err := s.db.Exec(`INSERT INTO runtime_withdrawals
+		(id, node_id, provider, amount_eur, fee_eur, status, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		ON CONFLICT (id) DO UPDATE SET
+		  status=EXCLUDED.status,
+		  fee_eur=EXCLUDED.fee_eur`,
+		wd.ID, wd.NodeID, wd.Provider, wd.AmountEur, wd.FeeEur,
+		wd.Status, wd.CreatedAt)
+	if err != nil {
+		log.Printf("store.SaveWithdrawal: %v", err)
+	}
+}
+
+// SaveKYC enregistre le statut KYC d'un vendeur (LAI-36).
+func (s *Store) SaveKYC(k *KYC) {
+	if !s.enabled() {
+		return
+	}
+	_, err := s.db.Exec(`INSERT INTO runtime_kyc (node_id, status, checked_at)
+		VALUES ($1,$2,$3)
+		ON CONFLICT (node_id) DO UPDATE SET
+		  status=EXCLUDED.status,
+		  checked_at=EXCLUDED.checked_at`,
+		k.NodeID, k.Status, k.CheckedAt)
+	if err != nil {
+		log.Printf("store.SaveKYC: %v", err)
+	}
+}
+
+// SumChunkPayouts : total des gains des chunks termines (reconciliation
+// LAI-34). 0 en mode memoire sans BDD (la reconciliation ne compare
+// alors que le ledger a lui-meme, sans objet).
+func (s *Store) SumChunkPayouts() float64 {
+	if !s.enabled() {
+		return 0
+	}
+	var sum sql.NullFloat64
+	err := s.db.QueryRow(`SELECT COALESCE(SUM(payout_eur), 0)
+		FROM runtime_chunks WHERE status = 'done'`).Scan(&sum)
+	if err != nil {
+		log.Printf("store.SumChunkPayouts: %v", err)
+		return 0
+	}
+	return sum.Float64
+}
+
+// LoadWallet recharge ledger, retraits et KYC au demarrage.
+func (s *Store) LoadWallet(w *Wallet) {
+	if !s.enabled() {
+		return
+	}
+	rows, err := s.db.Query(`SELECT id, at, node_id, entry_type, amount_eur, ref
+		FROM runtime_ledger ORDER BY id`)
+	if err != nil {
+		log.Printf("store.LoadWallet(ledger): %v", err)
+	} else {
+		for rows.Next() {
+			var e LedgerEntry
+			if rows.Scan(&e.Seq, &e.At, &e.NodeID, &e.EntryType,
+				&e.AmountEur, &e.Ref) == nil {
+				w.RestoreLedger(&e)
+			}
+		}
+		rows.Close()
+	}
+
+	rows, err = s.db.Query(`SELECT id, node_id, provider, amount_eur,
+		fee_eur, status, created_at FROM runtime_withdrawals ORDER BY created_at`)
+	if err != nil {
+		log.Printf("store.LoadWallet(withdrawals): %v", err)
+	} else {
+		for rows.Next() {
+			var wd Withdrawal
+			if rows.Scan(&wd.ID, &wd.NodeID, &wd.Provider, &wd.AmountEur,
+				&wd.FeeEur, &wd.Status, &wd.CreatedAt) == nil {
+				w.RestoreWithdrawal(&wd)
+			}
+		}
+		rows.Close()
+	}
+
+	rows, err = s.db.Query(`SELECT node_id, status, checked_at FROM runtime_kyc`)
+	if err != nil {
+		log.Printf("store.LoadWallet(kyc): %v", err)
+	} else {
+		for rows.Next() {
+			var k KYC
+			var checked sql.NullTime
+			if rows.Scan(&k.NodeID, &k.Status, &checked) == nil {
+				if checked.Valid {
+					k.CheckedAt = &checked.Time
+				}
+				w.RestoreKYC(&k)
+			}
+		}
+		rows.Close()
+	}
+}
+
 // LoadAll recharge l'etat au demarrage : prix courants, noeuds connus,
 // organisations clientes, chunks non termines.
 func (s *Store) LoadAll(reg *Registry, pricing *Pricing, chunker *Chunker, orgs *OrgStore) {
