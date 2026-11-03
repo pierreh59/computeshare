@@ -1,4 +1,9 @@
 // Ecran fournisseur : stats temps reel + controle du noeud.
+(async () => {
+  const app = document.querySelector("#app");
+  try {
+    if (!window.__TAURI__) throw new Error("API Tauri indisponible (withGlobalTauri ou capabilities manquants)");
+    const inv = window.__TAURI__.core.invoke;
 const inv = window.__TAURI__.core.invoke;
 const hw = await inv("detect_hardware");
 const nodeId = "node-" + Math.random().toString(16).slice(2, 8);
@@ -55,3 +60,7 @@ async function refresh() {
 }
 refresh();
 setInterval(refresh, 2000);
+  } catch (e) {
+    app.innerHTML = "<h1>ComputeShare</h1><p style='color:#f87171'>Erreur au chargement : " + e + "</p>";
+  }
+})();
