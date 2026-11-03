@@ -38,11 +38,10 @@ pub fn run_benchmark(gpu_category: String) -> BenchResult {
     for (i, b) in payload.iter_mut().enumerate() { *b = (i % 251) as u8; }
 
     // GPU inconnu -> NVML indisponible : on note 0, le verdict reste CPU.
-    // (le Nvml doit rester en vie pendant que le device l'utilise)
-    let dev = match Nvml::init() {
-        Ok(nvml) => nvml.device_by_index(0).ok(),
-        Err(_) => None,
-    };
+    // nvml reste en vie jusqu'a la fin de la fonction : le device
+    // l'emprunte pendant toute la boucle de benchmark.
+    let nvml = Nvml::init().ok();
+    let dev = nvml.as_ref().and_then(|n| n.device_by_index(0).ok());
     let mut gpu_util_max = 0u32;
     let mut gpu_mem_used_mb = 0u32;
 
