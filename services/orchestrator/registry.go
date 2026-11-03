@@ -58,7 +58,10 @@ func (r *Registry) Register(id, gpuModel, gpuCategory, zone, fingerprint string)
 	n.Online = true
 
 	// Anti-Sybil : meme machine sous deux identites ?
-	if fingerprint != "" {
+	// Uniquement a la creation d'une NOUVELLE identite : une simple
+	// reconnexion (meme node_id) ne doit jamais etre penalisee,
+	// sinon un redemarrage du client effacerait la confiance.
+	if !ok && fingerprint != "" {
 		for _, other := range r.nodes {
 			if other.ID != id && other.MachineFingerprint == fingerprint {
 				r.fraud.CheckSybil(id, other.ID, fingerprint)
