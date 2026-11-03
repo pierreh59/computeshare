@@ -2,11 +2,10 @@
   "productName": "ComputeShare",
   "identifier": "com.computeshare.desktop",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm run build"
+    "frontendDist": "../src"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "ComputeShare",
@@ -17,7 +16,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' https://gateway.computeshare.dev wss://gateway.computeshare.dev"
+      "csp": "default-src 'self'; connect-src 'self' http://localhost:8081 https://gateway.computeshare.dev wss://gateway.computeshare.dev"
     }
   },
   "bundle": {
