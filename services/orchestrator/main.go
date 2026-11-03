@@ -1,4 +1,4 @@
-package main
+﻿package main
 
 import (
 "encoding/json"
@@ -15,7 +15,8 @@ port = "8080"
 }
 registry := NewRegistry()
 hub := NewHub(registry)
-chunker := NewChunker(registry)
+pricing := NewPricing()
+chunker := NewChunker(registry, pricing)
 
 http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 fmt.Fprintln(w, "ok")
@@ -41,6 +42,44 @@ nodeWS(registry, hub, w, r)
 http.HandleFunc("/jobs", submitJob(chunker))
 http.HandleFunc("/chunks", nextChunk(chunker))
 http.HandleFunc("/chunk_result", completeChunk(chunker))
+
+// LAI-51/52 : console admin (cle via en-tete X-Admin-Key).
+http.HandleFunc("/admin/pricing", func(w http.ResponseWriter, r *http.Request) {
+if !requireAdmin(r) {
+http.Error(w, "forbidden", http.StatusForbidden)
+return
+}
+switch r.Method {
+case "GET":
+writeJSON(w, map[string]interface{}{
+"current": pricing.Snapshot(),
+"floors":  FLOORS,
+})
+case "POST":
+var req struct {
+Category   string  `json:"category"`
+EurPerHour float64 `json:"eur_per_hour"`
+}
+if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+http.Error(w, "invalid", http.StatusBadRequest)
+return
+}
+if err := pricing.SetPrice(req.Category, req.EurPerHour); err != nil {
+http.Error(w, err.Error(), http.StatusBadRequest)
+return
+}
+writeJSON(w, pricing.Snapshot())
+default:
+http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+}
+})
+http.HandleFunc("/admin/alerts", func(w http.ResponseWriter, r *http.Request) {
+if !requireAdmin(r) {
+http.Error(w, "forbidden", http.StatusForbidden)
+return
+}
+writeJSON(w, pricing.Alerts())
+})
 
 log.Printf("orchestrator listening on :%s", port)
 if err := http.ListenAndServe(":"+port, nil); err != nil {

@@ -107,6 +107,7 @@ fn run_and_report(gateway: &str, chunk: &serde_json::Value) {
         "chunk_id": res.chunk_id,
         "outcome": res.outcome,
         "sha256": res.output_sha256.unwrap_or_default(),
+        "duration_secs": (res.duration_ms / 1000) as u64,
     })
     .to_string();
     let _ = crate::http::post_json(gateway, "/chunk_result", &payload);
