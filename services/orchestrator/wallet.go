@@ -385,7 +385,7 @@ func walletWithdraw(w *Wallet) http.HandlerFunc {
 			Provider  string  `json:"provider"`
 			AmountEur float64 `json:"amount_eur"`
 		}
-		if err := decodeJSON(r, &req); err != nil || req.NodeID == "" {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.NodeID == "" {
 			http.Error(rw, "invalid", http.StatusBadRequest)
 			return
 		}
