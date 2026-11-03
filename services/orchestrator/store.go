@@ -33,8 +33,18 @@ func NewStore() *Store {
 		log.Printf("store: ouverture impossible: %v - mode memoire", err)
 		return &Store{db: nil}
 	}
-	if err := db.Ping(); err != nil {
-		log.Printf("store: BDD injoignable: %v - mode memoire", err)
+	// Docker demarre souvent postgres APRES l'orchestrateur : on laisse
+	// jusqu'a 30 s a la BDD pour repondre avant de basculer en memoire
+	// (sinon un demarrage frais du compose perdait la persistance).
+	var pingErr error
+	for i := 0; i < 15; i++ {
+		if pingErr = db.Ping(); pingErr == nil {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
+	if pingErr != nil {
+		log.Printf("store: BDD injoignable apres 30 s: %v - mode memoire", pingErr)
 		db.Close()
 		return &Store{db: nil}
 	}
