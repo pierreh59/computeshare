@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 )
 
 func main() {
@@ -20,7 +21,8 @@ func main() {
 	hub := NewHub(registry)
 	pricing := NewPricing(store)
 	chunker := NewChunker(registry, pricing, store)
-	store.LoadAll(registry, pricing, chunker)
+	orgs := NewOrgStore(store)
+	store.LoadAll(registry, pricing, chunker, orgs)
 
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "ok")
@@ -83,6 +85,51 @@ func main() {
 			return
 		}
 		writeJSON(w, pricing.Alerts())
+	})
+
+	// LAI-29 : creation d'une organisation cliente (admin only).
+	// La cle API n'est montree qu'une fois, a la creation.
+	http.HandleFunc("/admin/orgs", func(w http.ResponseWriter, r *http.Request) {
+		if !requireAdmin(r) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		if r.Method != "POST" {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+			http.Error(w, "invalid", http.StatusBadRequest)
+			return
+		}
+		org, key, err := orgs.CreateOrg(req.Name)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]interface{}{
+			"org_id":  org.ID,
+			"name":    org.Name,
+			"api_key": key,
+		})
+	})
+
+	// LAI-30 : API v1 clients B2B (auth Bearer, cf. api/openapi.yaml).
+	http.HandleFunc("/v1/jobs", v1Submit(orgs, chunker))
+	http.HandleFunc("/v1/jobs/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/status"):
+			v1Status(orgs, chunker).ServeHTTP(w, r)
+		case strings.HasSuffix(r.URL.Path, "/results"):
+			v1Results(orgs, chunker).ServeHTTP(w, r)
+		case strings.HasSuffix(r.URL.Path, "/cancel"):
+			v1Cancel(orgs, chunker).ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
 	})
 
 	log.Printf("orchestrator listening on :%s", port)

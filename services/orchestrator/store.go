@@ -3,6 +3,7 @@ package main
 // Sprint 8 - Persistance PostgreSQL des etats runtime.
 // Mode degrade : si DATABASE_URL est vide ou la BDD injoignable,
 // l'orchestrateur continue en memoire (best effort, jamais de crash).
+// Sprint 9 - Persiste aussi les organisations clientes (LAI-29).
 
 import (
 	"database/sql"
@@ -117,9 +118,25 @@ func (s *Store) SavePriceChange(category string, eurPerHour float64) {
 	}
 }
 
+// SaveOrg insere ou rafraichit une organisation cliente (LAI-29).
+func (s *Store) SaveOrg(org *Org, keyHash string) {
+	if !s.enabled() {
+		return
+	}
+	_, err := s.db.Exec(`INSERT INTO runtime_orgs (id, name, api_key_hash, created_at)
+		VALUES ($1,$2,$3,$4)
+		ON CONFLICT (id) DO UPDATE SET
+		  name=EXCLUDED.name,
+		  api_key_hash=EXCLUDED.api_key_hash`,
+		org.ID, org.Name, keyHash, org.CreatedAt)
+	if err != nil {
+		log.Printf("store.SaveOrg: %v", err)
+	}
+}
+
 // LoadAll recharge l'etat au demarrage : prix courants, noeuds connus,
-// chunks non termines (les "running" redeviennent "queued").
-func (s *Store) LoadAll(reg *Registry, pricing *Pricing, chunker *Chunker) {
+// organisations clientes, chunks non termines.
+func (s *Store) LoadAll(reg *Registry, pricing *Pricing, chunker *Chunker, orgs *OrgStore) {
 	if !s.enabled() {
 		return
 	}
@@ -157,7 +174,21 @@ func (s *Store) LoadAll(reg *Registry, pricing *Pricing, chunker *Chunker) {
 		rows.Close()
 	}
 
-	// 3. Chunks non termines.
+	// 3. Organisations clientes.
+	rows, err = s.db.Query(`SELECT id, name, api_key_hash FROM runtime_orgs`)
+	if err != nil {
+		log.Printf("store.LoadAll(orgs): %v", err)
+	} else {
+		for rows.Next() {
+			var id, name, keyHash string
+			if rows.Scan(&id, &name, &keyHash) == nil {
+				orgs.Restore(id, name, keyHash)
+			}
+		}
+		rows.Close()
+	}
+
+	// 4. Chunks non termines.
 	rows, err = s.db.Query(`SELECT id, job_id, node_id, command, args,
 		expected_output, timeout_secs, price_eur_per_hour
 		FROM runtime_chunks WHERE status IN ('queued','running')`)
@@ -176,9 +207,9 @@ func (s *Store) LoadAll(reg *Registry, pricing *Pricing, chunker *Chunker) {
 				chunker.Restore(&Chunk{
 					ID: id, JobID: jobID, NodeID: nodeID,
 					Command: cmd, Args: args,
-					ExpectedOutput: output,
-					TimeoutSecs: uint64(timeout),
-					Status:        "queued",
+					ExpectedOutput:  output,
+					TimeoutSecs:    uint64(timeout),
+					Status:         "queued",
 					PriceEurPerHour: price,
 				})
 			}

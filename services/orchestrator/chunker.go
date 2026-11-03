@@ -4,6 +4,7 @@ package main
 // LAI-51/52 - Le tarif est gele au moment de la livraison du chunk
 // (jamais retroactif) et le paiement est calcule a la completion.
 // Sprint 8 - Chaque transition d'etat est persistee dans PostgreSQL.
+// Sprint 9 - Annulation et liste de resultats (API v1, LAI-30).
 
 import (
 	"encoding/json"
@@ -133,6 +134,36 @@ func (c *Chunker) Complete(chunkID, outcome, sha string, durationSecs uint64) bo
 	return false
 }
 
+// CancelJob annule les chunks pas encore demarres. Retourne le nombre
+// de chunks annules (LAI-30 : POST /v1/jobs/<id>/cancel).
+func (c *Chunker) CancelJob(jobID string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := 0
+	for _, ch := range c.chunks {
+		if ch.JobID == jobID && ch.Status == "queued" {
+			ch.Status = "canceled"
+			c.store.SaveChunk(ch)
+			n++
+		}
+	}
+	return n
+}
+
+// Results liste les chunks termines d'un job avec leurs checksums
+// (LAI-30 : GET /v1/jobs/<id>/results).
+func (c *Chunker) Results(jobID string) []Chunk {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []Chunk
+	for _, ch := range c.chunks {
+		if ch.JobID == jobID && ch.Status == "done" {
+			out = append(out, *ch)
+		}
+	}
+	return out
+}
+
 // Restore recharge un chunk non termine au demarrage : les chunks
 // "running" au moment de l'arret redeviennent "queued" (re-claimables).
 func (c *Chunker) Restore(ch *Chunk) {
@@ -159,7 +190,9 @@ func seqOf(id string) int {
 func (c *Chunker) JobStatus(jobID string) map[string]int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	st := map[string]int{"queued": 0, "running": 0, "done": 0, "failed": 0}
+	st := map[string]int{
+		"queued": 0, "running": 0, "done": 0, "failed": 0, "canceled": 0,
+	}
 	for _, ch := range c.chunks {
 		if ch.JobID == jobID {
 			st[ch.Status]++

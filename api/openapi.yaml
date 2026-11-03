@@ -1,0 +1,159 @@
+openapi: 3.1.0
+info:
+  title: ComputeShare API v1
+  version: 1.0.0
+  description: |
+    API de soumission de jobs pour les clients B2B de ComputeShare.
+    Authentification : chaque organisation cliente recoit une cle API
+    (creee par l'admin via POST /admin/orgs) et l'envoie dans l'en-tete
+    "Authorization: Bearer <cle>".
+servers:
+  - url: https://gateway.computeshare.dev
+    description: Production (a venir)
+  - url: http://localhost:8080
+    description: Development local
+security:
+  - bearerAuth: []
+
+paths:
+  /v1/jobs:
+    post:
+      operationId: submitJob
+      summary: Soumettre un job
+      description: Le job est decoupe en task_count chunks, distribues
+        sur les noeuds fournisseurs en ligne. Reponse 503 si aucun
+        noeud n'est disponible.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, command, task_count]
+              properties:
+                id:
+                  type: string
+                  description: Identifiant du job, unique par organisation.
+                  example: render-2026-001
+                command:
+                  type: string
+                  example: compute_worker.exe
+                args:
+                  type: array
+                  items: { type: string }
+                  example: ["--frame", "42"]
+                task_count:
+                  type: integer
+                  minimum: 1
+                  example: 10
+                output_name:
+                  type: string
+                  example: frame_42.png
+                timeout_secs:
+                  type: integer
+                  example: 300
+      responses:
+        "200":
+          description: Job accepte et decoupe.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id: { type: string }
+                  task_count: { type: integer }
+                  status:
+                    type: string
+                    enum: [queued]
+        "401": { description: Cle API absente ou invalide. }
+        "400": { description: Corps invalide. }
+        "503": { description: Aucun noeud disponible. }
+
+  /v1/jobs/{job_id}/status:
+    get:
+      operationId: getJobStatus
+      summary: Avancement d'un job
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Comptages par statut de chunk et statut resume du job.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id: { type: string }
+                  status:
+                    type: string
+                    enum: [running, completed]
+                  chunks:
+                    type: object
+                    properties:
+                      queued: { type: integer }
+                      running: { type: integer }
+                      done: { type: integer }
+                      failed: { type: integer }
+                      canceled: { type: integer }
+        "401": { description: Cle API absente ou invalide. }
+
+  /v1/jobs/{job_id}/results:
+    get:
+      operationId: getJobResults
+      summary: Resultats d'un job
+      description: Liste les chunks termines, avec le checksum SHA-256
+        de chaque sortie (preuve d'execution, LAI-43 a venir).
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Chunks termines.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string }
+                    job_id: { type: string }
+                    node_id: { type: string }
+                    result_sha256: { type: string }
+                    payout_eur: { type: number }
+        "401": { description: Cle API absente ou invalide. }
+
+  /v1/jobs/{job_id}/cancel:
+    post:
+      operationId: cancelJob
+      summary: Annuler un job
+      description: Annule les chunks pas encore demarres. Les chunks
+        "running" vont jusqu'au bout (et sont payes au tarif gele).
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Nombre de chunks annules.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id: { type: string }
+                  canceled: { type: integer }
+        "401": { description: Cle API absente ou invalide. }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Cle API de l'organisation (prefixe cshare_).
