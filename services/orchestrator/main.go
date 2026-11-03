@@ -17,10 +17,11 @@ func main() {
 
 	// Sprint 8 : persistance PostgreSQL (mode memoire si BDD absente).
 	store := NewStore()
-	registry := NewRegistry(store)
+	fraud := NewFraud()
+	registry := NewRegistry(store, fraud)
 	hub := NewHub(registry)
 	pricing := NewPricing(store)
-	chunker := NewChunker(registry, pricing, store)
+	chunker := NewChunker(registry, pricing, store, fraud)
 	orgs := NewOrgStore(store)
 	store.LoadAll(registry, pricing, chunker, orgs)
 
@@ -32,16 +33,18 @@ func main() {
 	})
 	http.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
 		var msg struct {
-			NodeID      string `json:"node_id"`
-			GPUModel    string `json:"gpu_model"`
-			GPUCategory string `json:"gpu_category"`
-			Zone        string `json:"zone"`
+			NodeID             string `json:"node_id"`
+			GPUModel           string `json:"gpu_model"`
+			GPUCategory        string `json:"gpu_category"`
+			Zone               string `json:"zone"`
+			MachineFingerprint string `json:"machine_fingerprint"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&msg); err != nil || msg.NodeID == "" {
 			http.Error(w, "invalid register", http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, registry.Register(msg.NodeID, msg.GPUModel, msg.GPUCategory, msg.Zone))
+		writeJSON(w, registry.Register(msg.NodeID, msg.GPUModel,
+			msg.GPUCategory, msg.Zone, msg.MachineFingerprint))
 	})
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		nodeWS(registry, hub, w, r)
@@ -86,6 +89,15 @@ func main() {
 			return
 		}
 		writeJSON(w, pricing.Alerts())
+	})
+
+	// LAI-43/44 : alertes anti-fraude (Sybil, execution ralentie).
+	http.HandleFunc("/admin/fraud", func(w http.ResponseWriter, r *http.Request) {
+		if !requireAdmin(r) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		writeJSON(w, fraud.Alerts())
 	})
 
 	// LAI-29 : creation d'une organisation cliente (admin only).

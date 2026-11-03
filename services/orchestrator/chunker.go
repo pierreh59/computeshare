@@ -47,6 +47,9 @@ type Chunk struct {
 	PriceEurPerHour float64 `json:"price_eur_per_hour,omitempty"`
 	// Paiement calcule a la completion (EUR).
 	PayoutEur float64 `json:"payout_eur,omitempty"`
+	// LAI-43/44 : duree reelle declaree et flag d'echantillonnage.
+	DurationSecs uint64 `json:"duration_secs,omitempty"`
+	Sampled      bool   `json:"sampled,omitempty"`
 }
 
 // Chunker : ordre de creation conserve pour une distribution stable.
@@ -55,14 +58,15 @@ type Chunker struct {
 	reg     *Registry
 	pricing *Pricing
 	store   *Store
+	fraud   *Fraud
 	chunks  []*Chunk
 	seq     int
 }
 
 const maxChunkAttempts = 3
 
-func NewChunker(r *Registry, p *Pricing, s *Store) *Chunker {
-	c := &Chunker{reg: r, pricing: p, store: s, chunks: make([]*Chunk, 0)}
+func NewChunker(r *Registry, p *Pricing, s *Store, f *Fraud) *Chunker {
+	c := &Chunker{reg: r, pricing: p, store: s, fraud: f, chunks: make([]*Chunk, 0)}
 	go c.rescheduleLoop()
 	return c
 }
@@ -133,6 +137,7 @@ func (c *Chunker) Complete(chunkID, outcome, sha string, durationSecs uint64) bo
 	defer c.mu.Unlock()
 	for _, ch := range c.chunks {
 		if ch.ID == chunkID {
+			ch.DurationSecs = durationSecs
 			if outcome == "ok" {
 				ch.Status = "done"
 				ch.ResultSHA256 = sha
@@ -141,6 +146,9 @@ func (c *Chunker) Complete(chunkID, outcome, sha string, durationSecs uint64) bo
 			} else {
 				ch.Status = "failed"
 			}
+			// LAI-43/44 : sampling et detection d'execution ralentie
+			// (logique detaillee dans fraud.go).
+			c.fraudCheck(ch, outcome)
 			c.store.SaveChunk(ch)
 			return true
 		}

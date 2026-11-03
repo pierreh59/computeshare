@@ -58,10 +58,18 @@ use std::time::Duration;
 
 fn node_loop(gateway: String, node_id: String) {
     let hw = crate::hw::detect_hardware().ok();
+    // LAI-44 : empreinte machine pour la detection anti-Sybil
+    // (nom de machine + modele CPU, sans donnee personnelle).
+    let machine_fingerprint = format!(
+        "{}|{}",
+        std::env::var("COMPUTERNAME").unwrap_or_default(),
+        hw.as_ref().map(|h| h.cpu_model.clone()).unwrap_or_default()
+    );
     let register_body = serde_json::json!({
         "node_id": node_id,
         "gpu_model": hw.as_ref().map(|h| h.gpu_model.clone()).unwrap_or_default(),
         "gpu_category": hw.as_ref().map(|h| h.gpu_category.clone()).unwrap_or_default(),
+        "machine_fingerprint": machine_fingerprint,
     })
     .to_string();
 

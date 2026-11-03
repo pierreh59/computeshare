@@ -57,15 +57,17 @@ func (s *Store) SaveNode(n *Node) {
 		return
 	}
 	_, err := s.db.Exec(`INSERT INTO runtime_nodes
-		(id, gpu_model, gpu_category, zone, trust_score, status, last_seen, online)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		(id, gpu_model, gpu_category, zone, machine_fingerprint,
+		 trust_score, status, last_seen, online)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 		ON CONFLICT (id) DO UPDATE SET
 		  gpu_model=EXCLUDED.gpu_model,
 		  gpu_category=EXCLUDED.gpu_category,
 		  zone=EXCLUDED.zone,
+		  machine_fingerprint=EXCLUDED.machine_fingerprint,
 		  last_seen=EXCLUDED.last_seen,
 		  online=EXCLUDED.online`,
-		n.ID, n.GPUModel, n.GPUCategory, n.Zone,
+		n.ID, n.GPUModel, n.GPUCategory, n.Zone, n.MachineFingerprint,
 		n.TrustScore, n.Status, n.LastSeen, n.Online)
 	if err != nil {
 		log.Printf("store.SaveNode: %v", err)
@@ -95,8 +97,8 @@ func (s *Store) SaveChunk(ch *Chunk) {
 	_, err := s.db.Exec(`INSERT INTO runtime_chunks
 		(id, job_id, node_id, command, args, expected_output, timeout_secs,
 		 status, result_sha256, price_eur_per_hour, payout_eur,
-		 attempts, zone, assets, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now())
+		 attempts, zone, assets, duration_secs, sampled, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, now())
 		ON CONFLICT (id) DO UPDATE SET
 		  status=EXCLUDED.status,
 		  result_sha256=EXCLUDED.result_sha256,
@@ -104,11 +106,14 @@ func (s *Store) SaveChunk(ch *Chunk) {
 		  payout_eur=EXCLUDED.payout_eur,
 		  attempts=EXCLUDED.attempts,
 		  node_id=EXCLUDED.node_id,
+		  duration_secs=EXCLUDED.duration_secs,
+		  sampled=EXCLUDED.sampled,
 		  updated_at=now()`,
 		ch.ID, ch.JobID, ch.NodeID, ch.Command, string(args), ch.ExpectedOutput,
 		ch.TimeoutSecs, ch.Status, nullStr(ch.ResultSHA256),
 		ch.PriceEurPerHour, ch.PayoutEur,
-		ch.Attempts, nullStr(ch.Zone), string(assets))
+		ch.Attempts, nullStr(ch.Zone), string(assets),
+		ch.DurationSecs, ch.Sampled)
 	if err != nil {
 		log.Printf("store.SaveChunk: %v", err)
 	}
@@ -210,15 +215,16 @@ func (s *Store) LoadAll(reg *Registry, pricing *Pricing, chunker *Chunker, orgs 
 
 	// 2. Noeuds connus (hors ligne jusqu'a re-enregistrement).
 	rows, err = s.db.Query(`SELECT id, gpu_model, gpu_category,
-		trust_score, status, zone FROM runtime_nodes`)
+		trust_score, status, zone,
+		COALESCE(machine_fingerprint, '') FROM runtime_nodes`)
 	if err != nil {
 		log.Printf("store.LoadAll(nodes): %v", err)
 	} else {
 		for rows.Next() {
-			var id, model, cat, status, zone string
+			var id, model, cat, status, zone, fingerprint string
 			var trust float64
-			if rows.Scan(&id, &model, &cat, &trust, &status, &zone) == nil {
-				reg.Restore(id, model, cat, trust, status, zone)
+			if rows.Scan(&id, &model, &cat, &trust, &status, &zone, &fingerprint) == nil {
+				reg.Restore(id, model, cat, trust, status, zone, fingerprint)
 			}
 		}
 		rows.Close()
