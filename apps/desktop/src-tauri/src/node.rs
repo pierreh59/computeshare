@@ -1,0 +1,126 @@
+﻿//! LAI-53 - Client noeud : boucle register / poll chunks / report.
+//! Register periodique (idempotent, sert de heartbeat), claim d'un chunk
+//! seulement si la machine est idle, execution dans le sandbox, remontee
+//! du resultat + checksum SHA-256.
+
+use crate::sandbox::{run_chunk, ChunkSpec};
+use serde::Serialize;
+use std::sync::{Mutex, OnceLock};
+
+#[derive(Serialize, Clone)]
+pub struct NodeStatus {
+    pub running: bool,
+    pub gateway: String,
+    pub node_id: String,
+    pub chunks_done: u32,
+    pub chunks_failed: u32,
+    pub last_error: String,
+}
+
+fn status_cell() -> &'static Mutex<NodeStatus> {
+    static CELL: OnceLock<Mutex<NodeStatus>> = OnceLock::new();
+    CELL.get_or_init(|| {
+        Mutex::new(NodeStatus {
+            running: false,
+            gateway: String::new(),
+            node_id: String::new(),
+            chunks_done: 0,
+            chunks_failed: 0,
+            last_error: String::new(),
+        })
+    })
+}
+
+#[tauri::command]
+pub fn start_node(gateway: String, node_id: String) -> Result<(), String> {
+    let (gw, id) = (gateway.trim().to_string(), node_id.trim().to_string());
+    if gw.is_empty() || id.is_empty() {
+        return Err("gateway et node_id requis".into());
+    }
+    let mut st = status_cell().lock().unwrap();
+    if st.running {
+        return Ok(()); // deja demarre, une seule boucle par noeud
+    }
+    st.running = true;
+    st.gateway = gw.clone();
+    st.node_id = id.clone();
+    drop(st);
+    std::thread::spawn(move || node_loop(gw, id));
+    Ok(())
+}
+
+#[tauri::command]
+pub fn node_status() -> NodeStatus {
+    status_cell().lock().unwrap().clone()
+}
+
+use std::time::Duration;
+
+fn node_loop(gateway: String, node_id: String) {
+    let hw = crate::hw::detect_hardware().ok();
+    let register_body = serde_json::json!({
+        "node_id": node_id,
+        "gpu_model": hw.as_ref().map(|h| h.gpu_model.clone()).unwrap_or_default(),
+        "gpu_category": hw.as_ref().map(|h| h.gpu_category.clone()).unwrap_or_default(),
+    })
+    .to_string();
+
+    loop {
+        // 1. Register : idempotent, met a jour LastSeen = heartbeat.
+        match crate::http::post_json(&gateway, "/register", &register_body) {
+            Some(r) if r.status == 200 => (),
+            Some(r) => set_error(&format!("register: HTTP {}", r.status)),
+            None => set_error("gateway injoignable"),
+        }
+
+        // 2. Claim un chunk seulement si la machine est idle (LAI-21).
+        if crate::idle::get_idle_status().should_mine {
+            if let Some(r) = crate::http::get(&gateway, &format!("/chunks?node_id={}", node_id)) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&r.body) {
+                    if v.is_object() {
+                        run_and_report(&gateway, &v);
+                    }
+                }
+            }
+        }
+
+        std::thread::sleep(Duration::from_secs(5));
+    }
+}
+
+fn run_and_report(gateway: &str, chunk: &serde_json::Value) {
+    let spec = ChunkSpec {
+        chunk_id: chunk["id"].as_str().unwrap_or_default().to_string(),
+        command: chunk["command"].as_str().unwrap_or_default().to_string(),
+        args: chunk["args"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+            .unwrap_or_default(),
+        expected_output: chunk["expected_output"].as_str().unwrap_or_default().to_string(),
+        timeout_secs: chunk["timeout_secs"].as_u64().unwrap_or(0),
+    };
+    if spec.chunk_id.is_empty() {
+        return;
+    }
+    let res = run_chunk(spec);
+    let payload = serde_json::json!({
+        "chunk_id": res.chunk_id,
+        "outcome": res.outcome,
+        "sha256": res.output_sha256.unwrap_or_default(),
+    })
+    .to_string();
+    let _ = crate::http::post_json(gateway, "/chunk_result", &payload);
+
+    let mut st = status_cell().lock().unwrap();
+    if res.outcome == "ok" {
+        st.chunks_done += 1;
+        st.last_error.clear();
+    } else {
+        st.chunks_failed += 1;
+        st.last_error = format!("{}: {}", res.outcome, res.detail);
+    }
+}
+
+fn set_error(msg: &str) {
+    status_cell().lock().unwrap().last_error = msg.to_string();
+}

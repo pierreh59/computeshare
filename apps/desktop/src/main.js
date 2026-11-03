@@ -1,6 +1,7 @@
-﻿// Ecran temps reel fournisseur : gains, charge GPU, temperature, statut.
+﻿// Ecran fournisseur : stats temps reel + controle du noeud.
 const inv = window.__TAURI__.core.invoke;
 const hw = await inv("detect_hardware");
+const nodeId = "node-" + Math.random().toString(16).slice(2, 8);
 
 document.querySelector("#app").innerHTML = `
   <h1>ComputeShare</h1>
@@ -15,8 +16,26 @@ document.querySelector("#app").innerHTML = `
     <div class="cs-stat"><div class="cs-stat-label">Statut minage</div>
       <div class="cs-stat-value" id="mine">PAUSE</div></div>
   </div>
+  <div style="margin-top:16px">
+    <input id="gw" value="http://localhost:8080" size="24">
+    <button id="start">Demarrer le noeud (${nodeId})</button>
+    <span id="nodeinfo" style="margin-left:8px"></span>
+  </div>
   <p id="state" style="margin-top:16px">...</p>
 `;
+
+document.querySelector("#start").onclick = async () => {
+  try {
+    await inv("start_node", {
+      gateway: document.querySelector("#gw").value,
+      nodeId: nodeId,
+    });
+    document.querySelector("#start").disabled = true;
+    document.querySelector("#start").textContent = "Noeud demarre (" + nodeId + ")";
+  } catch (e) {
+    alert("Echec du demarrage : " + e);
+  }
+};
 
 async function refresh() {
   const s = await inv("get_live_stats");
@@ -26,6 +45,13 @@ async function refresh() {
   document.querySelector("#mine").textContent = s.should_mine ? "ACTIF" : "PAUSE";
   document.querySelector("#state").textContent =
     "CPU " + s.cpu_load.toFixed(0) + " % - uptime " + s.uptime_secs + " s";
+  try {
+    const n = await inv("node_status");
+    document.querySelector("#nodeinfo").textContent = n.running
+      ? "en ligne - " + n.chunks_done + " ok / " + n.chunks_failed + " echecs" +
+        (n.last_error ? " - " + n.last_error : "")
+      : "arrete";
+  } catch (e) { /* node_status pas dispo */ }
 }
 refresh();
 setInterval(refresh, 2000);
