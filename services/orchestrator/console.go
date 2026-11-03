@@ -75,7 +75,7 @@ const consoleHTML = `<!DOCTYPE html>
 var poll=null, prices={consumer:0.15,prosumer:0.25,high_end:0.35},
     MARGIN=1.30, VAT=0.20, AWS=1.00;
 function log(m,cls){var d=document.createElement('div');d.innerHTML='<span class="muted">'+new Date().toLocaleTimeString()+'</span> '+m;d.className=cls||'';document.getElementById('log').prepend(d);}
-function api(path,opts){opts=opts||{};opts.headers=Object.assign({'Content-Type':'application/json','Authorization':'Bearer '+key()},opts.headers||{});return fetch(path,opts).then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.error||r.status);return j;});});}
+function api(path,opts){opts=opts||{};opts.headers=Object.assign({'Content-Type':'application/json','Authorization':'Bearer '+key()},opts.headers||{});return fetch(path,opts).then(function(r){return r.text().then(function(t){var j;try{j=JSON.parse(t);}catch(e){j=null;}if(!r.ok)throw new Error((j&&j.error)||t||('HTTP '+r.status));return j;});});}
 function key(){return document.getElementById('key').value.trim();}
 function estimate(){
   var h=parseFloat(document.getElementById('hours').value)||0,
