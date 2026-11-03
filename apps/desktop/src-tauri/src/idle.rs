@@ -49,10 +49,17 @@ pub fn get_idle_status() -> IdleStatus {
     let sys = System::new_all();
     let cpu_load = sys.global_cpu_usage() as f32;
 
-    // GPU : NVML si dispo
-    let gpu_idle = match nvml_wrapper::Nvml::init().ok().and_then(|n| n.device_by_index(0).ok()) {
-        Some(dev) => dev.utilization_rates().map(|u| u.gpu < GPU_BUSY_THRESHOLD).unwrap_or(true),
-        None => true,
+    // GPU : NVML si dispo (le Nvml doit rester en vie pendant que le
+    // device l'utilise, d'ou les match imbriques plutot qu'un chainage).
+    let gpu_idle = match nvml_wrapper::Nvml::init() {
+        Ok(nvml) => match nvml.device_by_index(0) {
+            Ok(dev) => dev
+                .utilization_rates()
+                .map(|u| u.gpu < GPU_BUSY_THRESHOLD)
+                .unwrap_or(true),
+            Err(_) => true,
+        },
+        Err(_) => true,
     };
 
     let game_detected = !gpu_idle && cpu_load > CPU_BUSY_THRESHOLD;

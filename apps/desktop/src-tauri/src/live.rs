@@ -39,14 +39,16 @@ fn boot() -> &'static Instant {
 pub fn get_live_stats() -> LiveStats {
     let idle = crate::idle::get_idle_status();
 
-    let (gpu_load, gpu_temp) =
-        match nvml_wrapper::Nvml::init().ok().and_then(|n| n.device_by_index(0).ok()) {
-            Some(dev) => (
+    let (gpu_load, gpu_temp) = match nvml_wrapper::Nvml::init() {
+        Ok(nvml) => match nvml.device_by_index(0) {
+            Ok(dev) => (
                 dev.utilization_rates().map(|u| u.gpu).unwrap_or(0),
                 dev.temperature(TemperatureSensor::Gpu).unwrap_or(0),
             ),
-            None => (0, 0),
-        };
+            Err(_) => (0, 0),
+        },
+        Err(_) => (0, 0),
+    };
 
     // Temps ecoule depuis l'appel precedent (donc depuis le dernier refresh UI).
     let now = Instant::now();

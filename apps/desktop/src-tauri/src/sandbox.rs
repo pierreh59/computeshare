@@ -80,7 +80,7 @@ pub fn run_chunk(spec: ChunkSpec) -> ChunkResult {
         Duration::from_secs(spec.timeout_secs.min(MAX_TIMEOUT_SECS))
     };
 
-    let mut child = match Command::new(&spec.command)
+    let child = match Command::new(&spec.command)
         .args(&spec.args)
         .current_dir(&dir)
         .stdin(Stdio::null())

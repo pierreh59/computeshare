@@ -5,6 +5,7 @@
 //!   2. detecter un GPU falsifie (score aberrant vs baseline connue).
 
 use serde::Serialize;
+use sha2::Digest;
 use std::time::{Duration, Instant};
 use nvml_wrapper::Nvml;
 

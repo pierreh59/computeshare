@@ -17,11 +17,11 @@ pub struct HardwareInfo {
 fn categorize(gpu_model: &str, vram_mb: u32) -> String {
     let m = gpu_model.to_lowercase();
     if m.contains("3090") || m.contains("4090") || m.contains("4080") || vram_mb >= 20000 {
-        "high_end"
+        "high_end".to_string()
     } else if m.contains("4070") || m.contains("3080") || m.contains("7800") || vram_mb >= 10000 {
-        "prosumer"
+        "prosumer".to_string()
     } else {
-        "consumer"
+        "consumer".to_string()
     }
 }
 
