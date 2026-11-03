@@ -36,7 +36,9 @@ func main() {
 	http.HandleFunc("/nodes", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, registry.OnlineNodes())
 	})
-	http.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
+	// Sprint 14 : les endpoints noeuds sont proteges par le jeton
+	// d'enrolement (en-tete X-Node-Token, cf. nodeauth.go).
+	http.HandleFunc("/register", withNodeToken(func(w http.ResponseWriter, r *http.Request) {
 		var msg struct {
 			NodeID             string `json:"node_id"`
 			GPUModel           string `json:"gpu_model"`
@@ -50,13 +52,13 @@ func main() {
 		}
 		writeJSON(w, registry.Register(msg.NodeID, msg.GPUModel,
 			msg.GPUCategory, msg.Zone, msg.MachineFingerprint))
-	})
-	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	http.HandleFunc("/ws", withNodeToken(func(w http.ResponseWriter, r *http.Request) {
 		nodeWS(registry, hub, w, r)
-	})
+	}))
 	http.HandleFunc("/jobs", submitJob(chunker))
-	http.HandleFunc("/chunks", nextChunk(chunker))
-	http.HandleFunc("/chunk_result", completeChunk(chunker))
+	http.HandleFunc("/chunks", withNodeToken(nextChunk(chunker)))
+	http.HandleFunc("/chunk_result", withNodeToken(completeChunk(chunker)))
 
 	// LAI-51/52 : console admin (cle via en-tete X-Admin-Key).
 	http.HandleFunc("/admin/pricing", func(w http.ResponseWriter, r *http.Request) {
@@ -253,6 +255,19 @@ func main() {
 	http.HandleFunc("/admin/billing/topup", adminBillingTopUp(billing))
 	http.HandleFunc("/admin/billing/refund", adminBillingRefund(billing))
 
+	// Sprint 14 : TLS optionnel. Si TLS_CERT_FILE et TLS_KEY_FILE sont
+	// definis (ex. Let's Encrypt ou certificat interne), l'orchestrateur
+	// ecoute en HTTPS ; sinon HTTP (developpement local / derriere un
+	// reverse proxy TLS comme Caddy ou nginx, recommande en production).
+	certFile := os.Getenv("TLS_CERT_FILE")
+	keyFile := os.Getenv("TLS_KEY_FILE")
+	if certFile != "" && keyFile != "" {
+		log.Printf("orchestrator listening on :%s (HTTPS, TLS actif)", port)
+		if err := http.ListenAndServeTLS(":"+port, certFile, keyFile, nil); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	log.Printf("orchestrator listening on :%s", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal(err)

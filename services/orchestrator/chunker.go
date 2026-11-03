@@ -88,6 +88,20 @@ func (c *Chunker) nodeCategory(nodeID string) string {
 
 // Submit decoupe le job en TaskCount chunks, distribues en round-robin
 // sur les noeuds en ligne. Retourne nil si aucun noeud n'est dispo.
+// JobExists indique si un job a deja ete soumis (LAI-55 :
+// idempotence des soumissions, protection contre les doubles
+// facturations accidentelles lors des retries reseau).
+func (c *Chunker) JobExists(jobID string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, ch := range c.chunks {
+		if ch.JobID == jobID {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Chunker) Submit(job Job, orgID string) []*Chunk {
 	nodes := c.reg.OnlineNodes()
 	if len(nodes) == 0 || job.TaskCount <= 0 {
@@ -288,6 +302,11 @@ func submitJob(c *Chunker) http.HandlerFunc {
 		var job Job
 		if err := json.NewDecoder(r.Body).Decode(&job); err != nil {
 			http.Error(w, "invalid job", http.StatusBadRequest)
+			return
+		}
+		// LAI-55 : idempotence egalement sur la soumission interne.
+		if c.JobExists(job.ID) {
+			http.Error(w, "job id already exists", http.StatusConflict)
 			return
 		}
 		writeJSON(w, c.Submit(job, ""))

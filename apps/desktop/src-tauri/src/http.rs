@@ -9,6 +9,12 @@ pub struct Response {
     pub body: String,
 }
 
+/// Jeton d'enrolement du noeud (Sprint 14) : identique a la variable
+/// NODE_ENROLLMENT_TOKEN de l'orchestrateur. Defaut dev pour le local.
+fn node_token() -> String {
+    std::env::var("COMPUTERSHARE_NODE_TOKEN").unwrap_or_else(|_| "dev-node-token".to_string())
+}
+
 /// "http://localhost:8080" -> ("localhost", 8080)
 pub fn split_url(url: &str) -> (String, u16) {
     let cleaned = url.trim().trim_start_matches("http://").trim_end_matches('/');
@@ -23,12 +29,12 @@ fn request(method: &str, url: &str, path: &str, body: Option<&str>) -> Option<Re
     let mut stream = TcpStream::connect((host.as_str(), port)).ok()?;
     let req = match body {
         Some(b) => format!(
-            "{} {} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            method, path, host, b.len(), b
+            "{} {} HTTP/1.1\r\nHost: {}\r\nX-Node-Token: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            method, path, host, node_token(), b.len(), b
         ),
         None => format!(
-            "{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
-            method, path, host
+            "{} {} HTTP/1.1\r\nHost: {}\r\nX-Node-Token: {}\r\nConnection: close\r\n\r\n",
+            method, path, host, node_token()
         ),
     };
     stream.write_all(req.as_bytes()).ok()?;

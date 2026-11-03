@@ -27,6 +27,11 @@ func v1Submit(orgs *OrgStore, c *Chunker, b *Billing) http.HandlerFunc {
 			http.Error(w, "invalid job", http.StatusBadRequest)
 			return
 		}
+		// LAI-55 : un job_id deja utilise est refuse (idempotence).
+		if c.JobExists(job.ID) {
+			http.Error(w, "job id already exists", http.StatusConflict)
+			return
+		}
 		chunks := c.Submit(job, org.ID)
 		if chunks == nil {
 			http.Error(w, "no node available", http.StatusServiceUnavailable)
