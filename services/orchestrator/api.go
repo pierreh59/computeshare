@@ -12,7 +12,7 @@ import (
 // POST /v1/jobs : soumet un job, decoupe en chunks par le chunker.
 func v1Submit(orgs *OrgStore, c *Chunker) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !orgs.Authenticate(r) {
+		if orgs.Authenticate(r) == nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -47,7 +47,7 @@ func jobIDFrom(path, action string) string {
 // GET /v1/jobs/<id>/status : avancement d'un job.
 func v1Status(orgs *OrgStore, c *Chunker) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !orgs.Authenticate(r) {
+		if orgs.Authenticate(r) == nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -77,7 +77,7 @@ func v1Status(orgs *OrgStore, c *Chunker) http.HandlerFunc {
 // GET /v1/jobs/<id>/results : chunks termines (checksums inclus).
 func v1Results(orgs *OrgStore, c *Chunker) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !orgs.Authenticate(r) {
+		if orgs.Authenticate(r) == nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -93,7 +93,7 @@ func v1Results(orgs *OrgStore, c *Chunker) http.HandlerFunc {
 // POST /v1/jobs/<id>/cancel : annule les chunks pas encore demarres.
 func v1Cancel(orgs *OrgStore, c *Chunker) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !orgs.Authenticate(r) {
+		if orgs.Authenticate(r) == nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

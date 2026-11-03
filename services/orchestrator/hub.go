@@ -13,6 +13,7 @@ type Message struct {
     NodeID       string  `json:"node_id,omitempty"`
     GPUModel     string  `json:"gpu_model,omitempty"`
     GPUCategory  string  `json:"gpu_category,omitempty"`
+    Zone         string  `json:"zone,omitempty"`
     GPULoad      float64 `json:"gpu_load,omitempty"`
     Intensity    float64 `json:"intensity,omitempty"`
 }
@@ -60,8 +61,9 @@ func nodeWS(reg *Registry, hub *Hub, w http.ResponseWriter, r *http.Request) {
         }
         switch msg.Type {
         case "register":
-            n := reg.Register(msg.NodeID, msg.GPUModel, msg.GPUCategory)
-            log.Printf("node registered: %s (%s/%s, trust %.0f)", n.ID, n.GPUModel, n.GPUCategory, n.TrustScore)
+            n := reg.Register(msg.NodeID, msg.GPUModel, msg.GPUCategory, msg.Zone)
+            log.Printf("node registered: %s (%s/%s, zone %s, trust %.0f)",
+                n.ID, n.GPUModel, n.GPUCategory, n.Zone, n.TrustScore)
         case "heartbeat":
             if !reg.Heartbeat(msg.NodeID) {
                 log.Printf("heartbeat d'un noeud inconnu: %s", msg.NodeID)

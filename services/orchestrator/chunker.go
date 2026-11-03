@@ -3,8 +3,9 @@ package main
 // LAI-25 - Chunker : decoupe un job client en chunks assignes aux noeuds.
 // LAI-51/52 - Le tarif est gele au moment de la livraison du chunk
 // (jamais retroactif) et le paiement est calcule a la completion.
+// LAI-27 - Re-scheduling : un chunk dont le noeud disparait est
+// redistribue a un autre noeud (preference meme zone), 3 tentatives max.
 // Sprint 8 - Chaque transition d'etat est persistee dans PostgreSQL.
-// Sprint 9 - Annulation et liste de resultats (API v1, LAI-30).
 
 import (
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Job soumis par un client B2B.
@@ -23,6 +25,8 @@ type Job struct {
 	TaskCount  int      `json:"task_count"`
 	OutputName string   `json:"output_name"`
 	TimeoutSec uint64   `json:"timeout_secs"`
+	Zone       string   `json:"zone,omitempty"`
+	AssetIDs   []string `json:"asset_ids,omitempty"`
 }
 
 // Chunk : une unite de travail assignee a un seul noeud.
@@ -36,6 +40,9 @@ type Chunk struct {
 	TimeoutSecs    uint64   `json:"timeout_secs"`
 	Status         string   `json:"status"`
 	ResultSHA256   string   `json:"result_sha256,omitempty"`
+	Attempts       int      `json:"attempts,omitempty"`
+	Zone           string   `json:"zone,omitempty"`
+	AssetIDs       []string `json:"asset_ids,omitempty"`
 	// LAI-51 : tarif gele a la livraison (EUR / GPU-heure).
 	PriceEurPerHour float64 `json:"price_eur_per_hour,omitempty"`
 	// Paiement calcule a la completion (EUR).
@@ -52,8 +59,12 @@ type Chunker struct {
 	seq     int
 }
 
+const maxChunkAttempts = 3
+
 func NewChunker(r *Registry, p *Pricing, s *Store) *Chunker {
-	return &Chunker{reg: r, pricing: p, store: s, chunks: make([]*Chunk, 0)}
+	c := &Chunker{reg: r, pricing: p, store: s, chunks: make([]*Chunk, 0)}
+	go c.rescheduleLoop()
+	return c
 }
 
 // nodeCategory retrouve la categorie GPU d'un noeud inscrit.
@@ -88,6 +99,8 @@ func (c *Chunker) Submit(job Job) []*Chunk {
 			ExpectedOutput: job.OutputName,
 			TimeoutSecs:    job.TimeoutSec,
 			Status:         "queued",
+			Zone:           job.Zone,
+			AssetIDs:       job.AssetIDs,
 		}
 		c.chunks = append(c.chunks, ch)
 		out = append(out, ch)
@@ -104,6 +117,7 @@ func (c *Chunker) NextFor(nodeID string) *Chunk {
 	for _, ch := range c.chunks {
 		if ch.NodeID == nodeID && ch.Status == "queued" {
 			ch.Status = "running"
+			ch.Attempts++
 			ch.PriceEurPerHour = c.pricing.CurrentPrice(c.nodeCategory(nodeID))
 			c.store.SaveChunk(ch)
 			return ch
@@ -134,8 +148,50 @@ func (c *Chunker) Complete(chunkID, outcome, sha string, durationSecs uint64) bo
 	return false
 }
 
-// CancelJob annule les chunks pas encore demarres. Retourne le nombre
-// de chunks annules (LAI-30 : POST /v1/jobs/<id>/cancel).
+// rescheduleLoop (LAI-27) : toutes les 10 s, les chunks "running"
+// dont le noeud a disparu sont redistribues. Apres 3 tentatives,
+// le chunk passe en echec definitif.
+func (c *Chunker) rescheduleLoop() {
+	for range time.Tick(10 * time.Second) {
+		c.mu.Lock()
+		online := c.reg.OnlineNodes()
+		for _, ch := range c.chunks {
+			if ch.Status != "running" || c.reg.IsOnline(ch.NodeID) {
+				continue
+			}
+			if ch.Attempts >= maxChunkAttempts {
+				ch.Status = "failed"
+				c.store.SaveChunk(ch)
+				continue
+			}
+			if next := pickNode(online, ch); next != "" {
+				ch.NodeID = next
+				ch.Status = "queued"
+				c.store.SaveChunk(ch)
+			}
+			// Aucun noeud dispo : on retente au prochain tick.
+		}
+		c.mu.Unlock()
+	}
+}
+
+// pickNode choisit un nouveau noeud pour un chunk, en privilegiant
+// la meme zone (data-locality, LAI-28).
+func pickNode(online []Node, ch *Chunk) string {
+	for _, n := range online {
+		if n.ID != ch.NodeID && n.Zone == ch.Zone {
+			return n.ID
+		}
+	}
+	for _, n := range online {
+		if n.ID != ch.NodeID {
+			return n.ID
+		}
+	}
+	return ""
+}
+
+// CancelJob annule les chunks pas encore demarres.
 func (c *Chunker) CancelJob(jobID string) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -150,8 +206,7 @@ func (c *Chunker) CancelJob(jobID string) int {
 	return n
 }
 
-// Results liste les chunks termines d'un job avec leurs checksums
-// (LAI-30 : GET /v1/jobs/<id>/results).
+// Results liste les chunks termines d'un job avec leurs checksums.
 func (c *Chunker) Results(jobID string) []Chunk {
 	c.mu.Lock()
 	defer c.mu.Unlock()

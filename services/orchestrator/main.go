@@ -35,12 +35,13 @@ func main() {
 			NodeID      string `json:"node_id"`
 			GPUModel    string `json:"gpu_model"`
 			GPUCategory string `json:"gpu_category"`
+			Zone        string `json:"zone"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&msg); err != nil || msg.NodeID == "" {
 			http.Error(w, "invalid register", http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, registry.Register(msg.NodeID, msg.GPUModel, msg.GPUCategory))
+		writeJSON(w, registry.Register(msg.NodeID, msg.GPUModel, msg.GPUCategory, msg.Zone))
 	})
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		nodeWS(registry, hub, w, r)
@@ -130,6 +131,16 @@ func main() {
 		default:
 			http.NotFound(w, r)
 		}
+	})
+
+	// LAI-28 : object store des assets clients (auth Bearer).
+	http.HandleFunc("/v1/assets", v1UploadAsset(orgs, store))
+	http.HandleFunc("/v1/assets/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/download") {
+			v1DownloadAsset(orgs, store).ServeHTTP(w, r)
+			return
+		}
+		http.NotFound(w, r)
 	})
 
 	log.Printf("orchestrator listening on :%s", port)

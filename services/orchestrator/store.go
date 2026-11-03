@@ -4,6 +4,8 @@ package main
 // Mode degrade : si DATABASE_URL est vide ou la BDD injoignable,
 // l'orchestrateur continue en memoire (best effort, jamais de crash).
 // Sprint 9 - Persiste aussi les organisations clientes (LAI-29).
+// Sprint 10 - Persiste les assets clients (LAI-28) et les nouvelles
+// colonnes des chunks (attempts, zone, assets) et noeuds (zone).
 
 import (
 	"database/sql"
@@ -55,14 +57,16 @@ func (s *Store) SaveNode(n *Node) {
 		return
 	}
 	_, err := s.db.Exec(`INSERT INTO runtime_nodes
-		(id, gpu_model, gpu_category, trust_score, status, last_seen, online)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		(id, gpu_model, gpu_category, zone, trust_score, status, last_seen, online)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		ON CONFLICT (id) DO UPDATE SET
 		  gpu_model=EXCLUDED.gpu_model,
 		  gpu_category=EXCLUDED.gpu_category,
+		  zone=EXCLUDED.zone,
 		  last_seen=EXCLUDED.last_seen,
 		  online=EXCLUDED.online`,
-		n.ID, n.GPUModel, n.GPUCategory, n.TrustScore, n.Status, n.LastSeen, n.Online)
+		n.ID, n.GPUModel, n.GPUCategory, n.Zone,
+		n.TrustScore, n.Status, n.LastSeen, n.Online)
 	if err != nil {
 		log.Printf("store.SaveNode: %v", err)
 	}
@@ -87,19 +91,24 @@ func (s *Store) SaveChunk(ch *Chunk) {
 		return
 	}
 	args, _ := json.Marshal(ch.Args)
+	assets, _ := json.Marshal(ch.AssetIDs)
 	_, err := s.db.Exec(`INSERT INTO runtime_chunks
 		(id, job_id, node_id, command, args, expected_output, timeout_secs,
-		 status, result_sha256, price_eur_per_hour, payout_eur, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now())
+		 status, result_sha256, price_eur_per_hour, payout_eur,
+		 attempts, zone, assets, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now())
 		ON CONFLICT (id) DO UPDATE SET
 		  status=EXCLUDED.status,
 		  result_sha256=EXCLUDED.result_sha256,
 		  price_eur_per_hour=EXCLUDED.price_eur_per_hour,
 		  payout_eur=EXCLUDED.payout_eur,
+		  attempts=EXCLUDED.attempts,
+		  node_id=EXCLUDED.node_id,
 		  updated_at=now()`,
 		ch.ID, ch.JobID, ch.NodeID, ch.Command, string(args), ch.ExpectedOutput,
 		ch.TimeoutSecs, ch.Status, nullStr(ch.ResultSHA256),
-		ch.PriceEurPerHour, ch.PayoutEur)
+		ch.PriceEurPerHour, ch.PayoutEur,
+		ch.Attempts, nullStr(ch.Zone), string(assets))
 	if err != nil {
 		log.Printf("store.SaveChunk: %v", err)
 	}
@@ -134,6 +143,47 @@ func (s *Store) SaveOrg(org *Org, keyHash string) {
 	}
 }
 
+// Asset : fichier client stocke par l'orchestrateur (LAI-28).
+type Asset struct {
+	ID        string `json:"asset_id"`
+	OrgID     string `json:"-"`
+	Filename  string `json:"filename"`
+	SHA256    string `json:"sha256"`
+	SizeBytes int64  `json:"size_bytes"`
+	Zone      string `json:"zone"`
+}
+
+// SaveAsset enregistre les metadonnees d'un asset (idempotent :
+// un contenu identique renvoie le meme asset_id).
+func (s *Store) SaveAsset(a *Asset) {
+	if !s.enabled() {
+		return
+	}
+	_, err := s.db.Exec(`INSERT INTO runtime_assets
+		(id, org_id, filename, sha256, size_bytes, zone)
+		VALUES ($1,$2,$3,$4,$5,$6)
+		ON CONFLICT (id) DO NOTHING`,
+		a.ID, a.OrgID, a.Filename, a.SHA256, a.SizeBytes, a.Zone)
+	if err != nil {
+		log.Printf("store.SaveAsset: %v", err)
+	}
+}
+
+// GetAsset charge les metadonnees d'un asset (nil si inconnu).
+func (s *Store) GetAsset(id string) *Asset {
+	if !s.enabled() {
+		return nil
+	}
+	row := s.db.QueryRow(`SELECT id, org_id, filename, sha256, size_bytes, zone
+		FROM runtime_assets WHERE id=$1`, id)
+	var a Asset
+	err := row.Scan(&a.ID, &a.OrgID, &a.Filename, &a.SHA256, &a.SizeBytes, &a.Zone)
+	if err != nil {
+		return nil
+	}
+	return &a
+}
+
 // LoadAll recharge l'etat au demarrage : prix courants, noeuds connus,
 // organisations clientes, chunks non termines.
 func (s *Store) LoadAll(reg *Registry, pricing *Pricing, chunker *Chunker, orgs *OrgStore) {
@@ -160,15 +210,15 @@ func (s *Store) LoadAll(reg *Registry, pricing *Pricing, chunker *Chunker, orgs 
 
 	// 2. Noeuds connus (hors ligne jusqu'a re-enregistrement).
 	rows, err = s.db.Query(`SELECT id, gpu_model, gpu_category,
-		trust_score, status FROM runtime_nodes`)
+		trust_score, status, zone FROM runtime_nodes`)
 	if err != nil {
 		log.Printf("store.LoadAll(nodes): %v", err)
 	} else {
 		for rows.Next() {
-			var id, model, cat, status string
+			var id, model, cat, status, zone string
 			var trust float64
-			if rows.Scan(&id, &model, &cat, &trust, &status) == nil {
-				reg.Restore(id, model, cat, trust, status)
+			if rows.Scan(&id, &model, &cat, &trust, &status, &zone) == nil {
+				reg.Restore(id, model, cat, trust, status, zone)
 			}
 		}
 		rows.Close()
@@ -188,9 +238,10 @@ func (s *Store) LoadAll(reg *Registry, pricing *Pricing, chunker *Chunker, orgs 
 		rows.Close()
 	}
 
-	// 4. Chunks non termines.
+	// 4. Chunks non termines (running -> queued, re-claimables).
 	rows, err = s.db.Query(`SELECT id, job_id, node_id, command, args,
-		expected_output, timeout_secs, price_eur_per_hour
+		expected_output, timeout_secs, price_eur_per_hour,
+		attempts, zone, assets
 		FROM runtime_chunks WHERE status IN ('queued','running')`)
 	if err != nil {
 		log.Printf("store.LoadAll(chunks): %v", err)
@@ -198,19 +249,28 @@ func (s *Store) LoadAll(reg *Registry, pricing *Pricing, chunker *Chunker, orgs 
 		for rows.Next() {
 			var id, jobID, nodeID, cmd, argsJSON, output string
 			var timeout, price float64
+			var attempts int
+			var zone sql.NullString
+			var assetsJSON string
 			if rows.Scan(&id, &jobID, &nodeID, &cmd, &argsJSON, &output,
-				&timeout, &price) == nil {
-				var args []string
+				&timeout, &price, &attempts, &zone, &assetsJSON) == nil {
+				var args, assets []string
 				if json.Unmarshal([]byte(argsJSON), &args) != nil {
 					args = nil
+				}
+				if json.Unmarshal([]byte(assetsJSON), &assets) != nil {
+					assets = nil
 				}
 				chunker.Restore(&Chunk{
 					ID: id, JobID: jobID, NodeID: nodeID,
 					Command: cmd, Args: args,
 					ExpectedOutput:  output,
-					TimeoutSecs:    uint64(timeout),
-					Status:         "queued",
+					TimeoutSecs:     uint64(timeout),
+					Status:          "queued",
 					PriceEurPerHour: price,
+					Attempts:        attempts,
+					Zone:            zone.String,
+					AssetIDs:        assets,
 				})
 			}
 		}

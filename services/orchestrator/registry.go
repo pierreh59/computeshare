@@ -12,6 +12,7 @@ type Node struct {
 	ID          string    `json:"id"`
 	GPUModel    string    `json:"gpu_model"`
 	GPUCategory string    `json:"gpu_category"`
+	Zone        string    `json:"zone"`
 	TrustScore  float64   `json:"trust_score"`
 	Status      string    `json:"status"`
 	LastSeen    time.Time `json:"last_seen"`
@@ -34,7 +35,10 @@ func NewRegistry(store *Store) *Registry {
 }
 
 // Register ajoute ou rafraichit un noeud (idempotent).
-func (r *Registry) Register(id, gpuModel, gpuCategory string) *Node {
+func (r *Registry) Register(id, gpuModel, gpuCategory, zone string) *Node {
+	if zone == "" {
+		zone = "local"
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n, ok := r.nodes[id]
@@ -44,6 +48,7 @@ func (r *Registry) Register(id, gpuModel, gpuCategory string) *Node {
 	}
 	n.GPUModel = gpuModel
 	n.GPUCategory = gpuCategory
+	n.Zone = zone
 	n.LastSeen = time.Now()
 	n.Online = true
 	r.store.SaveNode(n)
@@ -52,13 +57,17 @@ func (r *Registry) Register(id, gpuModel, gpuCategory string) *Node {
 
 // Restore recharge un noeud connu de la BDD au demarrage (hors ligne
 // jusqu'a ce qu'il se re-enregistre).
-func (r *Registry) Restore(id, gpuModel, gpuCategory string, trust float64, status string) {
+func (r *Registry) Restore(id, gpuModel, gpuCategory string, trust float64, status, zone string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if zone == "" {
+		zone = "local"
+	}
 	r.nodes[id] = &Node{
 		ID:          id,
 		GPUModel:    gpuModel,
 		GPUCategory: gpuCategory,
+		Zone:        zone,
 		TrustScore:  trust,
 		Status:      status,
 		Online:      false,
@@ -76,6 +85,14 @@ func (r *Registry) Heartbeat(id string) bool {
 	n.LastSeen = time.Now()
 	n.Online = true
 	return true
+}
+
+// IsOnline indique si un noeud est actuellement en ligne.
+func (r *Registry) IsOnline(id string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	n, ok := r.nodes[id]
+	return ok && n.Online
 }
 
 // OnlineNodes liste les noeuds consideres en ligne.

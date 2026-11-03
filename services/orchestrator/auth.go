@@ -75,16 +75,19 @@ func (o *OrgStore) Restore(id, name, keyHash string) {
 	o.keys[keyHash] = id
 }
 
-// Authenticate verifie l'en-tete Bearer et retourne l'org (nil si invalide).
-func (o *OrgStore) Authenticate(r *http.Request) bool {
+// Authenticate verifie l'en-tete Bearer et retourne l'organisation
+// concerne (nil si absente ou invalide).
+func (o *OrgStore) Authenticate(r *http.Request) *Org {
 	authHeader := r.Header.Get("Authorization")
 	const prefix = "Bearer "
 	if !strings.HasPrefix(authHeader, prefix) {
-		return false
+		return nil
 	}
 	hash := hashKey(strings.TrimPrefix(authHeader, prefix))
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	_, ok := o.keys[hash]
-	return ok
+	if id, ok := o.keys[hash]; ok {
+		return o.orgs[id]
+	}
+	return nil
 }
