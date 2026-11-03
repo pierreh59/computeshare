@@ -1,0 +1,19 @@
+﻿services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: computeshare
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: computeshare
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../db/migrations:/docker-entrypoint-initdb.d
+  nats:
+    image: nats:2-alpine
+    command: ["-js"]
+    ports:
+      - "4222:4222"
+volumes:
+  pgdata:
