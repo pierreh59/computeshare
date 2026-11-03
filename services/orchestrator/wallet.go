@@ -205,8 +205,13 @@ func (w *Wallet) RequestWithdrawal(nodeID, provider string, amountEur float64) (
 		return nil, err
 	}
 
-	if w.balanceLocked(nodeID) < amountEur {
-		return nil, fmt.Errorf("solde insuffisant")
+	// Solvabilite : le retrait ne doit jamais faire passer le solde en
+	// negatif. On verifie donc montant + frais, pas seulement le montant
+	// (bug trouve lors du test reel : 5 EUR de retrait + 0,50 EUR de
+	// frais sur un solde de 5,25 EUR laissait le wallet a -0,25 EUR).
+	if w.balanceLocked(nodeID) < amountEur+fee {
+		return nil, fmt.Errorf("solde insuffisant (montant + frais: %.2f EUR)",
+			amountEur+fee)
 	}
 
 	id := fmt.Sprintf("%s%d-%d", withdrawalIDPrefix, time.Now().Unix(), w.seq+1)
