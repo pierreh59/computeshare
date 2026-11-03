@@ -1,21 +1,32 @@
 ﻿package main
 
 import (
-"fmt"
-"net/http"
-"os"
+    "fmt"
+    "log"
+    "net/http"
+    "os"
 )
 
 func main() {
-port := os.Getenv("PORT")
-if port == "" {
-port = "8080"
-}
-http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-fmt.Fprintln(w, "ok")
-})
-fmt.Println("orchestrator listening on :" + port)
-if err := http.ListenAndServe(":"+port, nil); err != nil {
-panic(err)
-}
+    port := os.Getenv("PORT")
+    if port == "" {
+        port = "8080"
+    }
+    registry := NewRegistry()
+    hub := NewHub(registry)
+
+    http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+        fmt.Fprintln(w, "ok")
+    })
+    http.HandleFunc("/nodes", func(w http.ResponseWriter, r *http.Request) {
+        writeJSON(w, registry.OnlineNodes())
+    })
+    http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+        nodeWS(registry, hub, w, r)
+    })
+
+    log.Printf("orchestrator listening on :%s", port)
+    if err := http.ListenAndServe(":"+port, nil); err != nil {
+        log.Fatal(err)
+    }
 }
