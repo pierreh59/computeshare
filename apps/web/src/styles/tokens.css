@@ -1,0 +1,40 @@
+﻿/* ComputeShare Design System - LAI-15
+   Source : prototype canvas (theme sombre, accent emerald) */
+
+:root {
+  /* Couleurs de fond */
+  --bg-base: #0a0a0a;
+  --bg-card: #171717;
+  --bg-secondary: #262626;
+  --border: #2c2c2c;
+
+  /* Accent principal (emerald) */
+  --accent: #10b981;
+  --accent-hover: #059669;
+  --accent-soft: rgba(16, 185, 129, 0.15);
+  --accent-border: rgba(16, 185, 129, 0.3);
+
+  /* Couleurs secondaires */
+  --amber: #f59e0b;   /* action pause / attention */
+  --sky: #38bdf8;    /* en cours */
+  --red: #ef4444;    /* erreur / perdu */
+  --purple: #8b5cf6; /* graphiques reseau */
+
+  /* Texte */
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+
+  /* Espacements & rayons */
+  --radius: 8px;
+  --radius-lg: 12px;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px;
+  --space-4: 16px; --space-5: 24px; --space-6: 32px;
+
+  /* Typo */
+  --font: "Inter", system-ui, sans-serif;
+  --text-xs: 12px; --text-sm: 14px; --text-base: 16px;
+  --text-lg: 18px; --text-xl: 24px; --text-hero: 48px;
+
+  /* Effets */
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4);
+}

@@ -1,0 +1,30 @@
+﻿{
+  "productName": "ComputeShare",
+  "identifier": "com.computeshare.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "ComputeShare",
+        "width": 960,
+        "height": 640,
+        "minWidth": 720,
+        "minHeight": 480
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' https://gateway.computeshare.dev wss://gateway.computeshare.dev"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi"],
+    "windows": {
+      "webviewInstallMode": { "type": "embedBootstrapper" }
+    }
+  }
+}
