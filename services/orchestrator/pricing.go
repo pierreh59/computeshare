@@ -9,6 +9,7 @@ package main
 
 import (
 "fmt"
+"net/http"
 "os"
 "sync"
 "time"
@@ -140,24 +141,4 @@ func (p *Pricing) SetPrice(category string, eurPerHour float64) error {
     p.history = append(p.history, PriceChange{category, old, eurPerHour, time.Now()})
     p.addChurnAlert(category, eurPerHour)
     return nil
-}
-
-// addChurnAlert : alerte si la baisse depasse le seuil sur 24 h.
-func (p *Pricing) addChurnAlert(category string, eurPerHour float64) {
-    ref := p.priceAgoLocked(category, churnWindow)
-    if ref > 0 && eurPerHour < ref*(1-churnDropThreshold) {
-        msg := fmt.Sprintf(
-            "churn: %s passe de %.2f a %.2f EUR/h (-%.0f%%)",
-            category, ref, eurPerHour, (ref-eurPerHour)/ref*100)
-        p.alerts = append(p.alerts, Alert{Type: "churn", Msg: msg, At: time.Now()})
-    }
-}
-
-// requireAdmin : cle simple via l'en-tete X-Admin-Key (MVP).
-func requireAdmin(r *http.Request) bool {
-    key := os.Getenv("ADMIN_KEY")
-    if key == "" {
-        key = "dev-admin-key"
-    }
-    return r.Header.Get("X-Admin-Key") == key
 }
