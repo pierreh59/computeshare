@@ -26,6 +26,7 @@ func main() {
 	chunker := NewChunker(registry, pricing, store, fraud, wallet, billing)
 	orgs := NewOrgStore(store)
 	accounts := NewAccountStore(store, orgs)
+	orgs.SetAccountAuth(accounts.Authenticate)
 	nodeAuth := NewNodeAuth(accounts)
 	store.LoadAll(registry, pricing, chunker, orgs)
 	store.LoadUsers(accounts)
@@ -46,6 +47,17 @@ func main() {
 	http.HandleFunc("/auth/login", accounts.handleLogin)
 	http.HandleFunc("/auth/me", accounts.handleMe)
 	http.HandleFunc("/auth/seller-token", accounts.handleSellerToken)
+
+	// Sprint 15 (LAI-58) : pages web des comptes.
+	http.HandleFunc("/signup", signupPage)
+	http.HandleFunc("/login", loginPage)
+	http.HandleFunc("/me", mePage)
+	http.HandleFunc("/seller", sellerPage)
+	http.HandleFunc("/seller/nodes", accounts.handleSellerNodes(registry))
+	http.HandleFunc("/seller/wallet", accounts.handleSellerWallet(registry, wallet))
+
+	// Mini-console admin (cle X-Admin-Key, LAI-59).
+	http.HandleFunc("/admin/console", adminPage)
 	// Sprint 14 : les endpoints noeuds sont proteges par le jeton
 	// d'enrolement (en-tete X-Node-Token, cf. nodeauth.go).
 	http.HandleFunc("/register", nodeAuth.withNodeToken(func(w http.ResponseWriter, r *http.Request, sellerID string) {

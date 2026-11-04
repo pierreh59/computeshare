@@ -200,3 +200,17 @@ func (r *Registry) BindSeller(nodeID, userID string) {
 	n.UserID = userID
 	r.store.SaveNode(n)
 }
+
+// NodesOfUser : tous les noeuds (en ligne ou non) lies a un compte
+// vendeur (Sprint 15). Sert a la console vendeur.
+func (r *Registry) NodesOfUser(userID string) []Node {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var out []Node
+	for _, n := range r.nodes {
+		if n.UserID == userID {
+			out = append(out, *n)
+		}
+	}
+	return out
+}

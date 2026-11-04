@@ -25,10 +25,11 @@ type Org struct {
 
 // OrgStore : organisations connues + index cle hachee -> org.
 type OrgStore struct {
-	mu    sync.RWMutex
-	orgs  map[string]*Org
-	keys  map[string]string
-	store *Store
+	mu          sync.RWMutex
+	orgs        map[string]*Org
+	keys        map[string]string
+	store       *Store
+	accountAuth func(r *http.Request) *User // sessions des comptes clients (Sprint 15)
 }
 
 func NewOrgStore(store *Store) *OrgStore {
@@ -85,9 +86,33 @@ func (o *OrgStore) Authenticate(r *http.Request) *Org {
 	}
 	hash := hashKey(strings.TrimPrefix(authHeader, prefix))
 	o.mu.RLock()
-	defer o.mu.RUnlock()
-	if id, ok := o.keys[hash]; ok {
-		return o.orgs[id]
+	id, ok := o.keys[hash]
+	var org *Org
+	if ok {
+		org = o.orgs[id]
+	}
+	auth := o.accountAuth
+	o.mu.RUnlock()
+	if ok {
+		return org
+	}
+	// Sprint 15 : session d'un compte client -> son organisation.
+	if auth != nil {
+		if u := auth(r); u != nil && u.OrgID != "" {
+			o.mu.RLock()
+			org := o.orgs[u.OrgID]
+			o.mu.RUnlock()
+			return org
+		}
 	}
 	return nil
+}
+// SetAccountAuth : la console web des comptes clients s'authentifie
+// par session (Sprint 15) au lieu de la cle API. Injecte le resolver
+// de sessions ; sans lui, seule la cle API fonctionne (comportement
+// historique des clients B2B pur API).
+func (o *OrgStore) SetAccountAuth(f func(r *http.Request) *User) {
+	o.mu.Lock()
+	o.accountAuth = f
+	o.mu.Unlock()
 }

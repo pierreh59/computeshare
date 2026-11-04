@@ -345,3 +345,41 @@ func (a *AccountStore) handleSellerToken(w http.ResponseWriter, r *http.Request)
 	a.mu.Unlock()
 	writeJSON(w, map[string]string{"node_token": token})
 }
+
+// GET /seller/nodes : les noeuds du vendeur authentifie (session).
+func (a *AccountStore) handleSellerNodes(reg *Registry) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		u := a.Authenticate(r)
+		if u == nil || u.Role != "seller" {
+			writeErr(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		writeJSON(w, reg.NodesOfUser(u.ID))
+	}
+}
+
+// GET /seller/wallet : solde agregate des wallets des noeuds du
+// vendeur authentifie + detail par noeud.
+func (a *AccountStore) handleSellerWallet(reg *Registry, wallet *Wallet) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		u := a.Authenticate(r)
+		if u == nil || u.Role != "seller" {
+			writeErr(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		nodes := reg.NodesOfUser(u.ID)
+		total := 0.0
+		detail := []map[string]interface{}{}
+		for _, n := range nodes {
+			b := wallet.Balance(n.ID)
+			total += b
+			detail = append(detail, map[string]interface{}{
+				"node_id": n.ID, "balance": b,
+				"online": n.Online, "gpu_model": n.GPUModel,
+			})
+		}
+		writeJSON(w, map[string]interface{}{
+			"total_balance": total, "nodes": detail,
+		})
+	}
+}
