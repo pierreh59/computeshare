@@ -66,7 +66,7 @@ function esc(s){var d=document.createElement('div');d.textContent=s==null?'':Str
 
 const signupHTML = `<!DOCTYPE html>
 <html lang="fr">
-<head><meta charset="utf-8"><title>ComputeShare - Inscription</title>` + accountsCSS + `</head>
+<head><meta charset="utf-8"><title>ComputeShare - Inscription</title>` + accountsCSS + accountsJS + `</head>
 <body>
 <h1>🥗 ComputeShare — Créer un compte</h1>
 <p class="muted">Déjà inscrit ? <a href="/login">Se connecter</a></p>
@@ -121,7 +121,7 @@ function doSignup(){
 
 const loginHTML = `<!DOCTYPE html>
 <html lang="fr">
-<head><meta charset="utf-8"><title>ComputeShare - Connexion</title>` + accountsCSS + `</head>
+<head><meta charset="utf-8"><title>ComputeShare - Connexion</title>` + accountsCSS + accountsJS + `</head>
 <body>
 <h1>🥗 ComputeShare — Connexion</h1>
 <p class="muted">Pas encore de compte ? <a href="/signup">S'inscrire</a></p>
