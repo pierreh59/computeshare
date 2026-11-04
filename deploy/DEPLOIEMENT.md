@@ -1,10 +1,13 @@
-# Deploiement de production ComputeShare
+# Deploiement de production ComputeShare (OVHcloud)
 
-Ce guide installe l'orchestrateur sur un vrai serveur, avec
+Ce guide installe l'orchestrateur sur un VPS OVHcloud, avec
 PostgreSQL, migrations automatiques et HTTPS automatique.
 
-Le cout de la solution recommandee : environ **4 EUR/mois**
-(Hetzner CX22) + un nom de domaine (~10 EUR/an chez OVH).
+Solution retenue : **VPS OVHcloud VPS-1 2027** (2 vCores, 4 Go RAM,
+40 Go NVMe, sauvegarde quotidienne incluse) - environ 4,50 EUR
+HT/mois sans engagement. Donnees hebergees en France (argument
+RGPD pour les clients B2B), trafic illimite, meme compte OVH que
+le nom de domaine.
 
 ## Architecture
 
@@ -14,48 +17,67 @@ Le cout de la solution recommandee : environ **4 EUR/mois**
 
 Tout tourne en conteneurs Docker sur un seul serveur.
 
-## 1. Creer le serveur (Hetzner)
+## 1. Commander le VPS (OVHcloud, meme compte que le domaine)
 
-1. Creer un compte sur https://console.hetzner.com (paiement par carte).
-2. New Project -> New Server :
-   - Location : Falkenstein (Allemagne)
-   - Image : Debian 12
-   - Type : Shared vCPU -> **CX22** (2 vCPU, 4 Go RAM, 40 Go disque)
-   - SSH key : la plus simple pour demarrer = definir un mot de passe
-     root (Selectionner "Password" a l'etape SSH keys)
-3. Noter l'**adresse IP** du serveur (affichee a la fin).
+1. Dans votre compte OVHcloud, rubrique **VPS** -> offre
+   **VPS-1 2027** (2 vCores / 4 Go / 40 Go NVMe).
+   Si l'offre est momentanement indisponible : reessayer avec
+   une autre localisation, patienter quelques jours (OVH
+   reapprovisionne regulierement), ou prendre le VPS-2 2027
+   sans engagement le temps de la phase pilote.
+2. **Localisation** : un datacenter en France (Gravelines ou
+   Strasbourg).
+3. **Systeme** : **Debian 12**, sans panel ni application
+   preinstallee (refuser Plesk, cPanel, "Apps", Windows).
+4. **Duree** : mensuel **sans engagement** (liberte de changer
+   de palier pendant la beta).
+5. **Authentification root** : definir un mot de passe long et
+   le noter precieusement.
+6. Une fois livre, relever l'**adresse IPv4** du serveur dans
+   le Manager OVH (Bare Metal Cloud -> VPS -> votre VPS).
 
-Pare-feu : a la creation, Hetzner demande un "Firewall". Creer un
-firewall avec ces regles entrantes (Inbound rules) :
-- TCP 22 (SSH) - depuis n'importe ou
-- TCP 80 (HTTP) - depuis n'importe ou
-- TCP 443 (HTTPS) - depuis n'importe ou
-Rien d'autre. Toutes les regles sortantes restent autorisees.
+## 2. Brancher le domaine (zone DNS OVH)
 
-## 2. Acheter un domaine et le pointer vers le serveur
+Le domaine computeshare.fr est deja gere par OVH. Dans le
+Manager : **Web Cloud -> computeshare.fr -> Zone DNS**, ajouter
+deux enregistrements **A** pointant vers l'IPv4 du VPS :
 
-1. Acheter un domaine (par exemple chez OVH : https://www.ovh.com).
-2. Dans la gestion DNS du domaine, creer un enregistrement **A** :
-   - Sous-domaine : `api`
-   - Cible : l'adresse IP du serveur Hetzner
-   - TTL : defaut
-3. Attendre quelques minutes. Test depuis son PC :
-   `ping api.mondomaine.fr` doit repondre avec l'IP du serveur.
+- sous-domaine vide (racine) : pour le site vitrine
+  (computeshare.fr)
+- sous-domaine `api` : pour la plateforme
+  (api.computeshare.fr)
 
-## 3. Installer Docker sur le serveur
+Si OVH propose de modifier les serveurs DNS : ne rien changer,
+garder les DNS OVH par defaut. Propagation : quelques minutes
+a une heure.
+
+## 3. Se connecter au serveur et installer Docker
 
 Depuis son PC (Windows 10/11 : PowerShell) :
 
     ssh root@IP_DU_SERVEUR
 
-Puis sur le serveur :
+(repondre "yes" a la question sur la fingerprint, puis saisir
+le mot de passe root defini a la commande).
+
+Sur le serveur :
 
     curl -fsSL https://get.docker.com | sh
+
+Pare-feu du serveur (n'exposer que l'essentiel) :
+
+    apt-get update && apt-get install -y ufw
+    ufw allow 22/tcp
+    ufw allow 80/tcp
+    ufw allow 443/tcp
+    ufw --force enable
+    ufw status
 
 ## 4. Installer ComputeShare
 
 Toujours sur le serveur :
 
+    apt-get install -y git
     git clone https://github.com/pierreh59/computeshare
     cd computeshare/deploy
     cp .env.example .env
@@ -63,21 +85,22 @@ Toujours sur le serveur :
 
 Remplir les valeurs :
 
-- `DOMAIN` : le sous-domaine cree a l'etape 2 (ex: `api.mondomaine.fr`)
-- `POSTGRES_PASSWORD` : un secret aleatoire. Generer avec :
+- `DOMAIN` : `api.computeshare.fr`
+- `SITE_DOMAIN` : `computeshare.fr`
+- `POSTGRES_PASSWORD` : secret aleatoire, generer avec
   `openssl rand -hex 24`
-- `ADMIN_KEY` : idem, un autre secret aleatoire (cle des commandes admin)
-- `NODE_ENROLLMENT_TOKEN` : idem (jeton que devront fournir les
-  noeuds vendeurs pour s'enroler)
+- `ADMIN_KEY` : autre secret aleatoire (cle des commandes
+  admin /admin/*)
+- `NODE_ENROLLMENT_TOKEN` : autre secret aleatoire (jeton que
+  doivent fournir les noeuds vendeurs pour s'enroler)
 
-Sauver (Ctrl+O, Entree, Ctrl+X dans nano).
-
-Puis lancer la stack :
+Sauver (Ctrl+O, Entree, Ctrl+X dans nano), puis lancer la
+stack :
 
     docker compose -f docker-compose.prod.yml --env-file .env up -d --build
 
-Premiere fois : quelques minutes (compilation Go + telechargement
-des images). Verifier que tout est parti :
+Premiere fois : quelques minutes (compilation Go + images).
+Verifier que tout est parti :
 
     docker compose -f docker-compose.prod.yml ps
 
@@ -87,22 +110,22 @@ Les services doivent etre "running" et "migrate" "exited (0)".
 
 Depuis son PC :
 
-    https://api.mondomaine.fr/nodes
+- https://computeshare.fr -> le site vitrine
+- https://api.computeshare.fr/nodes -> reponse JSON de l'API
+- https://api.computeshare.fr/console -> console client B2B
 
-Caddy obtient automatiquement le certificat HTTPS au premier acces
-(peut prendre 30 s). La reponse JSON doit apparaitre, et la console
-B2B est sur :
-
-    https://api.mondomaine.fr/console
+Caddy obtient automatiquement le certificat HTTPS au premier
+acces (peut prendre 30 s).
 
 ## 6. Brancher l'app desktop sur la production
 
 Dans l'app desktop, champ gateway :
 
-    https://api.mondomaine.fr
+    https://api.computeshare.fr
 
-Et pour que le noeud passe le controle X-Node-Token, lancer l'app
-avec le jeton de production (PowerShell, avant `cargo run`) :
+Et pour que le noeud passe le controle X-Node-Token, lancer
+l'app avec le jeton de production (PowerShell, avant
+`cargo run`) :
 
     $env:COMPUTERSHARE_NODE_TOKEN = "le-jeton-choisi-dans-.env"
     cargo run
@@ -110,7 +133,7 @@ avec le jeton de production (PowerShell, avant `cargo run`) :
 Ensuite : creer l'organisation cliente et recharger ses credits
 depuis le PC, avec la cle admin choisie dans .env :
 
-    $org = Invoke-RestMethod -Method Post https://api.mondomaine.fr/admin/orgs -ContentType "application/json" -Headers @{ "X-Admin-Key" = "la-cle-admin" } -Body '{"name":"ACME Corp"}'
+    $org = Invoke-RestMethod -Method Post https://api.computeshare.fr/admin/orgs -ContentType "application/json" -Headers @{ "X-Admin-Key" = "la-cle-admin" } -Body '{"name":"ACME Corp"}'
     $org.api_key
 
 ## 7. Mises a jour
@@ -119,16 +142,20 @@ Sur le serveur :
 
     cd computeshare
     git pull
-    docker compose -f docker-compose.prod.yml --env-file .env up -d --build
+    docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env up -d --build
 
-Les donnees PostgreSQL sont dans un volume Docker : elles survivent
-aux redemarrages et aux mises a jour.
+Les donnees PostgreSQL sont dans un volume Docker : elles
+survivent aux redemarrages et aux mises a jour. La sauvegarde
+quotidienne OVH (24 h glissantes) couvre les maladresses
+recentes ; une sauvegarde externe planifiee sera ajoutee avant
+l'ouverture de la beta.
 
 ## Notes de securite
 
 - Ne jamais commiter le fichier `.env` (le depot est public).
 - Les secrets doivent etre longs et aleatoires (`openssl rand -hex 24`).
-- Le serveur n'expose que 80/443 (et 22 pour l'administration SSH).
-- Garder l'acces root SSH avec mot de passe uniquement le temps de
-  configurer une cle SSH, puis desactiver l'authentification par
-  mot de passe (documente dans un futur durcissement).
+- Le serveur n'expose que 22/80/443 (ufw).
+- Garder l'acces root par mot de passe le temps de configurer
+  une cle SSH, puis desactiver l'authentification par mot de
+  passe dans /etc/ssh/sshd_config (PasswordAuthentication no)
+  et relancer le service ssh.
