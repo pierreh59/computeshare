@@ -1,6 +1,6 @@
 [package]
 name = "computeshare-desktop"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 [build-dependencies]
@@ -16,6 +16,13 @@ sha2 = "0.10"
 device_query = "2"
 # TLS pour parler a la gateway en HTTPS (ureq utilise rustls, pas d'OpenSSL requis).
 ureq = "2"
+# Repertoire de configuration multi-plateforme (%APPDATA% sous Windows).
+dirs = "5"
+# Sprint 16 : demarrage automatique, mises a jour, ouverture de liens.
+tauri-plugin-autostart = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+tauri-plugin-opener = "2"
 
 [profile.release]
 lto = true

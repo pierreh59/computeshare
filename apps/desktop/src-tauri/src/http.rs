@@ -7,10 +7,27 @@ pub struct Response {
     pub body: String,
 }
 
-/// Jeton d'enrolement du noeud (Sprint 14) : identique a la variable
-/// NODE_ENROLLMENT_TOKEN de l'orchestrateur. Defaut dev pour le local.
+/// Jeton du noeud. Sprint 16 : priorite a la variable d'environnement
+/// (COMPUTERSHARE_NODE_TOKEN, dev/tests), sinon au jeton personnel
+/// csnode_... recupere via la connexion (auth.rs), sinon dev local.
+static NODE_TOKEN: std::sync::OnceLock<std::sync::Mutex<String>> = std::sync::OnceLock::new();
+
+pub fn set_node_token(token: &str) {
+    let cell = NODE_TOKEN.get_or_init(|| std::sync::Mutex::new(String::new()));
+    *cell.lock().unwrap() = token.to_string();
+}
+
 fn node_token() -> String {
-    std::env::var("COMPUTERSHARE_NODE_TOKEN").unwrap_or_else(|_| "dev-node-token".to_string())
+    if let Ok(t) = std::env::var("COMPUTERSHARE_NODE_TOKEN") {
+        return t;
+    }
+    if let Some(cell) = NODE_TOKEN.get() {
+        let t = cell.lock().unwrap().clone();
+        if !t.is_empty() {
+            return t;
+        }
+    }
+    "dev-node-token".to_string()
 }
 
 /// Construit l'URL complete depuis la gateway et le chemin, en evitant
@@ -31,9 +48,17 @@ fn agent() -> ureq::Agent {
 }
 
 fn request(method: &str, url: &str, path: &str, body: Option<&str>) -> Option<Response> {
+    request_bearer(method, url, path, body, None)
+}
+
+/// Variante avec en-tete Authorization Bearer (API du compte, Sprint 16).
+fn request_bearer(method: &str, url: &str, path: &str, body: Option<&str>, bearer: Option<&str>) -> Option<Response> {
     let url = full_url(url, path);
-    let call = agent().request(method, &url)
+    let mut call = agent().request(method, &url)
         .set("X-Node-Token", &node_token());
+    if let Some(b) = bearer {
+        call = call.set("Authorization", &format!("Bearer {}", b));
+    }
     let resp = match body {
         Some(b) => call.set("Content-Type", "application/json").send_string(b),
         None => call.call(),
@@ -56,4 +81,8 @@ pub fn get(url: &str, path: &str) -> Option<Response> {
 
 pub fn post_json(url: &str, path: &str, body: &str) -> Option<Response> {
     request("POST", url, path, Some(body))
+}
+
+pub fn post_json_bearer(bearer: &str, url: &str, path: &str, body: &str) -> Option<Response> {
+    request_bearer("POST", url, path, Some(body), Some(bearer))
 }

@@ -1,4 +1,5 @@
 {
+  "version": "0.2.0",
   "productName": "ComputeShare",
   "identifier": "com.computeshare.desktop",
   "build": {
@@ -19,11 +20,23 @@
       "csp": "default-src 'self'; connect-src 'self' http://localhost:8081 https://api.computeshare.fr"
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "RWTWVckCN71guT8+rgj3Y7mfTUIGxfsjaVTuVaCpMEcKDu/YXK0GsnCN",
+      "endpoints": [
+        "https://github.com/pierreh59/computeshare/releases/latest/download/latest.json"
+      ]
+    }
+  },
   "bundle": {
     "active": true,
-    "targets": ["msi"],
+    "createUpdaterArtifacts": true,
+    "targets": ["nsis"],
     "windows": {
-      "webviewInstallMode": { "type": "embedBootstrapper" }
+      "webviewInstallMode": { "type": "embedBootstrapper" },
+      "nsis": {
+        "installMode": "currentUser"
+      }
     }
   }
 }

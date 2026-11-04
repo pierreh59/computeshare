@@ -31,12 +31,19 @@ fn status_cell() -> &'static Mutex<NodeStatus> {
     })
 }
 
+/// Sprint 16 : plus AUCUN parametre - tout vient de la configuration
+/// persistante (gateway + node_id + jeton recupere a la connexion).
 #[tauri::command]
-pub fn start_node(gateway: String, node_id: String) -> Result<(), String> {
-    let (gw, id) = (gateway.trim().to_string(), node_id.trim().to_string());
-    if gw.is_empty() || id.is_empty() {
-        return Err("gateway et node_id requis".into());
+pub fn start_node() -> Result<(), String> {
+    let cfg = crate::config::load();
+    if cfg.node_token.is_empty() {
+        return Err("Connectez-vous d'abord avec votre compte fournisseur.".into());
     }
+    let (gw, id) = (cfg.gateway.clone(), cfg.node_id.clone());
+    if gw.is_empty() || id.is_empty() {
+        return Err("configuration incomplete".into());
+    }
+    crate::http::set_node_token(&cfg.node_token);
     let mut st = status_cell().lock().unwrap();
     if st.running {
         return Ok(()); // deja demarre, une seule boucle par noeud
@@ -82,6 +89,9 @@ fn node_loop(gateway: String, node_id: String) {
                 // une reconnexion reussie.
                 status_cell().lock().unwrap().last_error.clear();
             }
+            Some(r) if r.status == 401 || r.status == 403 => set_error(
+                "jeton de noeud refuse : reconnectez-vous avec votre compte (bouton Se deconnecter puis connexion)",
+            ),
             Some(r) => set_error(&format!("register: HTTP {}", r.status)),
             None => set_error("gateway injoignable"),
         }

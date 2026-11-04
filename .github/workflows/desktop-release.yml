@@ -1,0 +1,52 @@
+# Sprint 16 (LAI-62) - Build de l'installateur Windows (NSIS) de l'app
+# fournisseur et publication en GitHub Release avec les artefacts de
+# mise a jour (latest.json + .sig signes).
+#
+# Preconditions (une seule fois) :
+#   1. Secret TAURI_SIGNING_PRIVATE_KEY : contenu de la cle privee
+#      minisign (ou chemin vers le fichier).
+#   2. Secret TAURI_SIGNING_PRIVATE_KEY_PASSWORD : mot de passe de la
+#      cle (chaine vide si aucun).
+# Les deux se posent dans GitHub > Settings > Secrets and variables >
+# Actions > New repository secret.
+#
+# Lancement : onglet Actions > Desktop release > Run workflow.
+
+name: Desktop release
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "apps/desktop/src-tauri"
+
+      - name: Verifier les secrets de signature
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::Secret TAURI_SIGNING_PRIVATE_KEY manquant (GitHub > Settings > Secrets and variables > Actions > New repository secret)"
+            exit 1
+          fi
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          tagName: desktop-v__VERSION__
+          releaseName: "ComputeShare Desktop v__VERSION__"
+          releaseBody: "Application fournisseur ComputeShare (Windows). Telechargez le fichier -setup.exe, lancez-le, connectez-vous avec votre compte fournisseur."
+          releaseDraft: false
+          prerelease: false
