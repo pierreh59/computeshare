@@ -98,7 +98,7 @@ pub fn run_chunk(spec: ChunkSpec) -> ChunkResult {
     // executable -> passage par cmd (Windows) ou sh (Unix) avec
     // redirection explicite vers le fichier resultat. Les metacaracteres
     // dans les arguments sont rejetes (pas d'injection shell).
-    let builder: std::process::Command = if spec.command == "echo" {
+    let mut builder: std::process::Command = if spec.command == "echo" {
         for a in &spec.args {
             if a.chars().any(|c| "&|<>\"'^%".contains(c)) {
                 return mk("rejected", "argument interdit pour echo", None);
