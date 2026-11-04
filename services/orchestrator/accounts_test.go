@@ -427,3 +427,123 @@ func TestThrottleLogin(t *testing.T) {
 		t.Errorf("6e tentative: attendu 429, eu %d", rec.Code)
 	}
 }
+
+
+// Sprint 15d (LAI-61) : comptes particulier vs societe.
+
+func TestValidSiretLuhn(t *testing.T) {
+	if !validSiret("12345678901237") {
+		t.Error("SIRET de test a cle Luhn valide refuse")
+	}
+	if validSiret("12345678901234") {
+		t.Error("SIRET a cle Luhn invalide doit etre refuse")
+	}
+	if validSiret("123456789012") || validSiret("") || validSiret("1234567890123a") {
+		t.Error("SIRET doit faire exactement 14 chiffres")
+	}
+	if !validVat("FR12345678901") || validVat("fr123") || validVat("FR-123") {
+		t.Error("validation TVA intracom incorrecte")
+	}
+}
+
+func TestSignupSocieteEtSiretInvalide(t *testing.T) {
+	a, _ := newTestAccounts(t)
+	// Inscription societe avec SIRET valide (cle Luhn locale).
+	rec := postJSON(t, a.handleSignup,
+		`{"email":"soc@y.fr","password":"motdepasse123","role":"client","consent":true,
+		  "company":{"name":"ACME SAS","siret":"12345678901237"}}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("signup societe: attendu 201, eu %d, %s", rec.Code, rec.Body)
+	}
+	var resp map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	u := resp["user"].(map[string]interface{})
+	if u["account_type"] != "societe" {
+		t.Errorf("account_type attendu societe, eu %v", u["account_type"])
+	}
+	if u["siret"] != "12345678901237" || u["company_name"] != "ACME SAS" {
+		t.Errorf("siret/raison sociale non enregistres: %v / %v", u["siret"], u["company_name"])
+	}
+	// SIRET a cle invalide : refuse.
+	rec2 := postJSON(t, a.handleSignup,
+		`{"email":"soc2@y.fr","password":"motdepasse123","role":"client","consent":true,
+		  "company":{"siret":"12345678901234"}}`)
+	if rec2.Code != http.StatusBadRequest {
+		t.Errorf("SIRET invalide: attendu 400, eu %d", rec2.Code)
+	}
+	// Sans societe : compte particulier.
+	rec3 := postJSON(t, a.handleSignup,
+		`{"email":"part@y.fr","password":"motdepasse123","role":"seller","consent":true}`)
+	var resp3 map[string]interface{}
+	json.Unmarshal(rec3.Body.Bytes(), &resp3)
+	u3 := resp3["user"].(map[string]interface{})
+	if u3["account_type"] != "particulier" {
+		t.Errorf("sans societe: attendu particulier, eu %v", u3["account_type"])
+	}
+}
+
+func TestSetCompanyApresInscription(t *testing.T) {
+	a, _ := newTestAccounts(t)
+	rec := postJSON(t, a.handleSignup,
+		`{"email":"evol@y.fr","password":"motdepasse123","role":"seller","consent":true}`)
+	var resp map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	sess := resp["session_token"].(string)
+	// Passage particulier -> societe.
+	body := `{"company":{"name":"Ma Societe","siret":"98765432109875","vat_number":"FR12345678901"}}`
+	req := httptest.NewRequest("POST", "/auth/company", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+sess)
+	rec2 := httptest.NewRecorder()
+	withSession(a, a.handleCompany)(rec2, req)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("set company: code %d, %s", rec2.Code, rec2.Body)
+	}
+	var u map[string]interface{}
+	json.Unmarshal(rec2.Body.Bytes(), &u)
+	if u["account_type"] != "societe" || u["siret_verified"] != false {
+		t.Errorf("compte societe attendu (non verifie), eu %v / %v", u["account_type"], u["siret_verified"])
+	}
+	// SIRET invalide refuse.
+	reqB := httptest.NewRequest("POST", "/auth/company",
+		strings.NewReader(`{"company":{"siret":"11111111111111"}}`))
+	reqB.Header.Set("Authorization", "Bearer "+sess)
+	rec3 := httptest.NewRecorder()
+	withSession(a, a.handleCompany)(rec3, reqB)
+	if rec3.Code != http.StatusBadRequest {
+		t.Errorf("SIRET invalide: attendu 400, eu %d", rec3.Code)
+	}
+	// Retour au statut particulier (donnees societe effacees).
+	reqC := httptest.NewRequest("POST", "/auth/company", strings.NewReader(`{"company":null}`))
+	reqC.Header.Set("Authorization", "Bearer "+sess)
+	rec4 := httptest.NewRecorder()
+	withSession(a, a.handleCompany)(rec4, reqC)
+	var u2 map[string]interface{}
+	json.Unmarshal(rec4.Body.Bytes(), &u2)
+	if u2["account_type"] != "particulier" || u2["siret"] != nil && u2["siret"] != "" {
+		t.Errorf("retour particulier attendu, eu %v", u2)
+	}
+}
+
+func TestPlafondsParticulier(t *testing.T) {
+	part := &User{AccountType: "particulier"}
+	socVerif := &User{AccountType: "societe", SiretVerified: true}
+	socAttente := &User{AccountType: "societe"} // SIRET pas encore verifie
+	if !TopupAllowed(part, 50) || TopupAllowed(part, 50.01) {
+		t.Error("plafond topup particulier = 50 EUR")
+	}
+	if !TopupAllowed(socVerif, 100000) {
+		t.Error("societe verifiee : pas de plafond topup")
+	}
+	if TopupAllowed(socAttente, 100) {
+		t.Error("societe non verifiee : plafond particulier s'applique")
+	}
+	if !WithdrawAllowed(part, 100, 500) || WithdrawAllowed(part, 100.01, 0) {
+		t.Error("plafond retrait mensuel particulier = 100 EUR")
+	}
+	if WithdrawAllowed(part, 0, 500.01) {
+		t.Error("plafond retrait cumule particulier = 500 EUR")
+	}
+	if !WithdrawAllowed(socVerif, 100000, 100000) {
+		t.Error("societe verifiee : pas de plafond retrait")
+	}
+}

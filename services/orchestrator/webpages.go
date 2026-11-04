@@ -75,6 +75,13 @@ function renderAccountCard(){
   '<label>Mot de passe actuel</label><input id="acc-pw0" type="password">'+
   '<label>Nouveau mot de passe (8 caractères min.)</label><input id="acc-pw1" type="password">'+
   '<button class="blue" onclick="savePass()">Changer le mot de passe</button>'+
+  '<h2 style="margin-top:28px">Mon statut</h2>'+
+  '<p class="muted">Compte '+(u.account_type==='societe'?'société':'particulier')+
+  (u.account_type==='societe'?(u.siret_verified?' — <span class="ok">SIRET vérifié ✓</span>':' — <span class="err">SIRET en cours de vérification</span>'):'')+'</p>'+
+  '<label>Raison sociale</label><input id="soc2-name" value="'+esc(u.company_name||'')+'">'+
+  '<label>N° SIRET (laisser vide pour un compte particulier)</label><input id="soc2-siret" value="'+esc(u.siret||'')+'">'+
+  '<label>N° TVA intracom. (optionnel)</label><input id="soc2-vat" value="'+esc(u.vat_number||'')+'">'+
+  '<button class="blue" onclick="saveCompany()">Enregistrer mon statut</button>'+
   '<h2 style="margin-top:28px">Mes données (RGPD)</h2>'+
   '<button class="gray" onclick="doExport()">⬇️ Exporter mes données (JSON)</button>'+
   '<p class="muted">La suppression du compte est définitive : nom, e-mail et mot de passe sont effacés'+(u.role==='seller'?', vos machines sont détachées':'')+'. Cette action ne peut pas être annulée.</p>'+
@@ -97,6 +104,22 @@ function savePass(){
   localStorage.setItem('cs-session',r.session_token);
   acctMsg('✅ Mot de passe changé. Vos autres appareils ont été déconnectés.','ok');
   document.getElementById('acc-pw0').value='';document.getElementById('acc-pw1').value='';
+ }).catch(function(e){acctMsg('Erreur : '+esc(e.message),'err');});
+}
+function saveCompany(){
+ var siret=document.getElementById('soc2-siret').value.replace(/\s/g,'');
+ var body={company:null};
+ if(siret){
+  if(siret.length!==14||!/^[0-9]{14}$/.test(siret)){
+   acctMsg('Le SIRET doit contenir exactement 14 chiffres.','err');return;
+  }
+  body.company={name:document.getElementById('soc2-name').value.trim(),
+   siret:siret,vat_number:document.getElementById('soc2-vat').value.trim().toUpperCase(),address:''};
+ }
+ api('/auth/company',{method:'POST',body:JSON.stringify(body)}).then(function(u2){
+  localStorage.setItem('cs-user',JSON.stringify(u2));
+  acctMsg('✅ Statut enregistré. La vérification INSEE du SIRET est lancée.','ok');
+  setTimeout(renderAccountCard,400);
  }).catch(function(e){acctMsg('Erreur : '+esc(e.message),'err');});
 }
 function doExport(){
@@ -131,6 +154,18 @@ const signupHTML = `<!DOCTYPE html>
 </div>
 
 <div class="card">
+ <h2>1bis. Mon statut</h2>
+ <span class="rolebtn sel" id="acct-part" onclick="setAcct('particulier')">👤 Un particulier</span>
+ <span class="rolebtn" id="acct-soc" onclick="setAcct('societe')">🏛️ Une société</span>
+ <div id="soc-fields" style="display:none">
+  <label>Raison sociale</label><input id="soc-name" placeholder="ACME Corp SAS">
+  <label>N° SIRET (14 chiffres)</label><input id="soc-siret" placeholder="12345678901234">
+  <label>N° TVA intracommunautaire (optionnel)</label><input id="soc-vat" placeholder="FR12345678901">
+  <p class="muted">Le SIRET est vérifié automatiquement auprès de l'INSEE. Les sociétés vérifiées n'ont pas les plafonds des comptes particuliers.</p>
+ </div>
+</div>
+
+<div class="card">
  <h2>2. Mes informations</h2>
  <label>Nom ou entreprise (optionnel)</label><input id="name" placeholder="Jean Dupont / ACME Corp">
  <label>Adresse e-mail</label><input id="email" type="email" placeholder="vous@exemple.fr">
@@ -142,6 +177,13 @@ const signupHTML = `<!DOCTYPE html>
 
 <script>
 var role='client';
+var acct='particulier';
+function setAcct(a){
+ acct=a;
+ document.getElementById('acct-part').className='rolebtn'+(a==='particulier'?' sel':'');
+ document.getElementById('acct-soc').className='rolebtn'+(a==='societe'?' sel':'');
+ document.getElementById('soc-fields').style.display=a==='societe'?'block':'none';
+}
 function setRole(r){
  role=r;
  document.getElementById('role-client').className='rolebtn'+(r==='client'?' sel':'');
@@ -155,6 +197,16 @@ function doSignup(){
  var body={email:document.getElementById('email').value.trim(),
   password:document.getElementById('password').value,
   name:document.getElementById('name').value.trim(),role:role,consent:true};
+ if(acct==='societe'){
+  body.company={name:document.getElementById('soc-name').value.trim(),
+   siret:document.getElementById('soc-siret').value.replace(/\s/g,''),
+   vat_number:document.getElementById('soc-vat').value.trim().toUpperCase(),
+   address:''};
+  if(body.company.siret.length!==14||!/^[0-9]{14}$/.test(body.company.siret)){
+   document.getElementById('msg').innerHTML='<p class="err">Le SIRET doit contenir exactement 14 chiffres.</p>';
+   return;
+  }
+ }
  fetch('/auth/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
  .then(function(r){return r.text().then(function(t){var j;try{j=JSON.parse(t);}catch(e){j=null;}
    if(!r.ok){throw new Error((j&&j.error)||t||('HTTP '+r.status));}return j;});})
@@ -460,7 +512,7 @@ const privacyHTML = `<!DOCTYPE html>
  <p><b>2. Compte.</b> Vous êtes responsable de la confidentialité de vos identifiants et de vos jetons. Vous devez avoir 18 ans ou l'autorisation d'un représentant légal.</p>
  <p><b>3. Service bêta.</b> Le service est fourni « en l'état », sans garantie de disponibilité. Des interruptions peuvent survenir pour maintenance ou évolution. Les données peuvent être réinitialisées pendant la phase de test.</p>
  <p><b>4. Usages interdits.</b> Contenus illégaux, atteinte aux droits d'autrui, tentative de contourner la tarification ou les contrôles anti-fraude, exécution de charges nuisibles pour les machines des fournisseurs.</p>
- <p><b>5. Tarifs et paiements.</b> Les entreprises achètent des crédits (euros HT) consommés à l'usage. Les gains des fournisseurs sont crédités sur leur portefeuille interne ; les retraits passent par la console d'administration après vérification. Pendant la bêta, les modalités de retrait restent à la discrétion de l'éditeur.</p>
+ <p><b>5. Tarifs et paiements.</b> Comptes particuliers : solde de crédits limité à 50 EUR et retraits limités (100 EUR / 30 jours, 500 EUR cumulés) ; ces plafonds ne s'appliquent pas aux sociétés dont le SIRET a été vérifié auprès de l'INSEE. Les entreprises achètent des crédits (euros HT) consommés à l'usage. Les gains des fournisseurs sont crédités sur leur portefeuille interne ; les retraits passent par la console d'administration après vérification. Pendant la bêta, les modalités de retrait restent à la discrétion de l'éditeur.</p>
  <p><b>6. Responsabilité.</b> L'éditeur ne saurait être tenu responsable des pertes de données, résultats de calcul ou incidents liés à la phase bêta. Sauvegardez vos données et vérifiez vos résultats.</p>
  <p><b>7. Résiliation.</b> Vous pouvez supprimer votre compte à tout moment depuis votre espace (« Mon compte »). L'éditeur peut suspendre un compte en cas de violation des présentes CGU.</p>
 </div>
@@ -468,7 +520,7 @@ const privacyHTML = `<!DOCTYPE html>
 <div class="card">
  <h2>Politique de confidentialité (RGPD)</h2>
  <p><b>Responsable de traitement :</b> ComputeShare (contact : support@computeshare.fr).</p>
- <p><b>Données collectées</b> — comptes : adresse e-mail, nom affiché (facultatif), mot de passe (haché, jamais en clair), horodatage de votre consentement. Machines : identifiant, modèle de GPU, disponibilité, gains. Facturation : historique des crédits et consommations.</p>
+ <p><b>Données collectées</b> — comptes : adresse e-mail, statut (particulier ou société), nom affiché (facultatif), mot de passe (haché, jamais en clair), horodatage de votre consentement. Sociétés : raison sociale, SIRET (vérifié auprès de l'INSEE), numéro de TVA intracommunautaire (facultatif). Machines : identifiant, modèle de GPU, disponibilité, gains. Facturation : historique des crédits et consommations.</p>
  <p><b>Finalités :</b> fournir le service (authentification, mise en relation, facturation), prévenir la fraude, respecter les obligations comptables.</p>
  <p><b>Base légale :</b> votre consentement (inscription), l'exécution du contrat (fonctionnement du service), l'obligation légale (conservation des écritures comptables).</p>
  <p><b>Durées :</b> comptes actifs : le temps du service. Écritures comptables : durée légale de conservation. Comptes supprimés : données personnelles effacées immédiatement, seules des écritures anonymisées sont conservées.</p>

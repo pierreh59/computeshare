@@ -201,6 +201,17 @@ func (r *Registry) BindSeller(nodeID, userID string) {
 	r.store.SaveNode(n)
 }
 
+// NodeOwner : identifiant du compte fournisseur proprietaire d'un
+// noeud (vide si orphelin). Sprint 15d : plafonds de retrait.
+func (r *Registry) NodeOwner(nodeID string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if n, ok := r.nodes[nodeID]; ok {
+		return n.UserID
+	}
+	return ""
+}
+
 // NodesOfUser : tous les noeuds (en ligne ou non) lies a un compte
 // vendeur (Sprint 15). Sert a la console vendeur.
 func (r *Registry) NodesOfUser(userID string) []Node {

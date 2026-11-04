@@ -16,6 +16,11 @@ services:
       ADMIN_KEY: ${ADMIN_KEY}
       NODE_ENROLLMENT_TOKEN: ${NODE_ENROLLMENT_TOKEN}
       SESSION_SECRET: ${SESSION_SECRET:-}
+      # Sprint 15d : verification SIRET via l'API INSEE SIRENE.
+      # Optionnel : sans ces identifiants, les comptes societe restent
+      # "non verifies" (AUCUNE inscription n'est bloquee).
+      INSEE_KEY: ${INSEE_KEY:-}
+      INSEE_SECRET: ${INSEE_SECRET:-}
     depends_on:
       db:
         condition: service_healthy

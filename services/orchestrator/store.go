@@ -69,6 +69,14 @@ func nullTime(t time.Time) interface{} {
 	return t
 }
 
+// nullTimePtr : *time.Time nil -> NULL SQL (Sprint 15d).
+func nullTimePtr(t *time.Time) interface{} {
+	if t == nil {
+		return nil
+	}
+	return *t
+}
+
 // SaveNode insere ou rafraichit un noeud (idempotent).
 func (s *Store) SaveNode(n *Node) {
 	if !s.enabled() {
@@ -511,8 +519,10 @@ func (s *Store) SaveUser(u *User, pwHash, tokenHash string) {
 	}
 	_, err := s.db.Exec(`INSERT INTO runtime_users
 		(id, email, password_hash, role, display_name, org_id,
-		 seller_token_hash, created_at, consent_at, sessions_before)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		 seller_token_hash, created_at, consent_at, sessions_before,
+		 account_type, company_name, siret, vat_number,
+		 company_address, siret_verified)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
 		ON CONFLICT (id) DO UPDATE SET
 		  email=EXCLUDED.email,
 		  password_hash=EXCLUDED.password_hash,
@@ -523,7 +533,10 @@ func (s *Store) SaveUser(u *User, pwHash, tokenHash string) {
 		  sessions_before=EXCLUDED.sessions_before`,
 		u.ID, u.Email, pwHash, u.Role, u.DisplayName, u.OrgID,
 		tokenHash, u.CreatedAt,
-		nullTime(u.ConsentAt), nullTime(u.SessionsBefore))
+		nullTime(u.ConsentAt), nullTime(u.SessionsBefore),
+		u.AccountType, nullStr(u.CompanyName), nullStr(u.Siret),
+		nullStr(u.VatNumber), nullStr(u.CompanyAddress),
+		u.SiretVerified)
 	if err != nil {
 		log.Printf("store.SaveUser: %v", err)
 	}
@@ -585,6 +598,24 @@ func (s *Store) SaveUserDeleted(u *User) {
 	}
 }
 
+// SaveUserCompany met a jour le statut particulier/societe et les
+// infos societe (Sprint 15d, LAI-61).
+func (s *Store) SaveUserCompany(u *User) {
+	if !s.enabled() {
+		return
+	}
+	_, err := s.db.Exec(`UPDATE runtime_users SET
+		account_type=$2, company_name=$3, siret=$4, vat_number=$5,
+		company_address=$6, siret_verified=$7, siret_checked_at=$8
+		WHERE id=$1`,
+		u.ID, u.AccountType, nullStr(u.CompanyName), nullStr(u.Siret),
+		nullStr(u.VatNumber), nullStr(u.CompanyAddress), u.SiretVerified,
+		nullTimePtr(u.SiretCheckedAt))
+	if err != nil {
+		log.Printf("store.SaveUserCompany: %v", err)
+	}
+}
+
 // LoadUsers recharge les comptes au demarrage. Sprint 15c : les
 // comptes supprimes ne sont pas restaures (ils restent anonymises en
 // base uniquement pour les ecritures comptables).
@@ -597,7 +628,11 @@ func (s *Store) LoadUsers(a *AccountStore) {
 		COALESCE(seller_token_hash, ''),
 		COALESCE(consent_at, created_at),
 		COALESCE(sessions_before, created_at),
-		deleted_at
+		deleted_at,
+		COALESCE(account_type, 'particulier'),
+		COALESCE(company_name, ''), COALESCE(siret, ''),
+		COALESCE(vat_number, ''), COALESCE(company_address, ''),
+		siret_verified, siret_checked_at
 		FROM runtime_users WHERE deleted_at IS NULL AND password_hash <> ''`)
 	if err != nil {
 		log.Printf("store.LoadUsers: %v", err)
@@ -606,12 +641,18 @@ func (s *Store) LoadUsers(a *AccountStore) {
 	defer rows.Close()
 	for rows.Next() {
 		var id, email, pwHash, role, display, orgID, tokenHash string
+		var accType, companyName, siret, vat, companyAddr string
 		var consentAt, sessionsBefore time.Time
-		var deletedAt *time.Time
+		var deletedAt, siretCheckedAt *time.Time
+		var siretVerified bool
 		if rows.Scan(&id, &email, &pwHash, &role, &display, &orgID, &tokenHash,
-			&consentAt, &sessionsBefore, &deletedAt) == nil {
+			&consentAt, &sessionsBefore, &deletedAt,
+			&accType, &companyName, &siret, &vat, &companyAddr,
+			&siretVerified, &siretCheckedAt) == nil {
 			a.Restore(id, email, pwHash, role, display, orgID, tokenHash,
-				consentAt, sessionsBefore, deletedAt)
+				consentAt, sessionsBefore, deletedAt,
+				accType, companyName, siret, vat, companyAddr,
+				siretVerified, siretCheckedAt)
 		}
 	}
 }

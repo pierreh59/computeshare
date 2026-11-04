@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 )
 
 func main() {
@@ -50,6 +51,8 @@ func main() {
 	// Sprint 15c (LAI-60) : gestion de compte - profil, mot de passe,
 	// portabilite (export) et droit a l'effacement.
 	http.HandleFunc("/auth/profile", withSession(accounts, accounts.handleProfile))
+	// Sprint 15d (LAI-61) : declaration societe (SIRET/TVA + verif SIRENE).
+	http.HandleFunc("/auth/company", withSession(accounts, accounts.handleCompany))
 	http.HandleFunc("/auth/password", withSession(accounts, accounts.handlePassword))
 	http.HandleFunc("/auth/export", withSession(accounts, accounts.handleExport(registry, wallet, billing)))
 	http.HandleFunc("/auth/account", withSession(accounts, accounts.handleDeleteAccount(registry)))
@@ -161,6 +164,33 @@ func main() {
 		if r.Method != "POST" {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
+		}
+		// Sprint 15d : plafonds de retrait des particuliers.
+		var req struct {
+			NodeID    string  `json:"node_id"`
+			Provider  string  `json:"provider"`
+			AmountEur float64 `json:"amount_eur"`
+		}
+		if json.NewDecoder(r.Body).Decode(&req) != nil || req.NodeID == "" {
+			http.Error(w, "invalid", http.StatusBadRequest)
+			return
+		}
+		if uid := registry.NodeOwner(req.NodeID); uid != "" {
+			if u := accounts.UserByID(uid); u != nil && u.isParticulier() {
+				last30d, total := 0.0, 0.0
+				for _, wd := range wallet.Withdrawals("") {
+					if registry.NodeOwner(wd.NodeID) == uid {
+						total += wd.AmountEur
+						if time.Since(wd.CreatedAt) < 30*24*time.Hour {
+							last30d += wd.AmountEur
+						}
+					}
+				}
+				if !WithdrawAllowed(u, last30d+req.AmountEur, total+req.AmountEur) {
+					http.Error(w, "plafond de retrait atteint pour un compte particulier (100 EUR / 30 jours, 500 EUR cumules)", http.StatusForbidden)
+					return
+				}
+			}
 		}
 		walletWithdraw(wallet).ServeHTTP(w, r)
 	})
@@ -290,7 +320,24 @@ func main() {
 	http.HandleFunc("/v1/usage", v1Usage(orgs, billing))
 	// Admin : vue billing, rechargement, remboursement.
 	http.HandleFunc("/admin/billing", adminBilling(billing))
-	http.HandleFunc("/admin/billing/topup", adminBillingTopUp(billing))
+	http.HandleFunc("/admin/billing/topup", func(w http.ResponseWriter, r *http.Request) {
+		// Sprint 15d : un compte particulier (ou societe non verifiee)
+		// ne peut pas depasser maxParticulierTopupEur de solde.
+		var req struct {
+			OrgID     string  `json:"org_id"`
+			AmountEur float64 `json:"amount_eur"`
+		}
+		if json.NewDecoder(r.Body).Decode(&req) != nil || req.OrgID == "" {
+			http.Error(w, "invalid", http.StatusBadRequest)
+			return
+		}
+		if u := accounts.UserByOrg(req.OrgID); u != nil &&
+			!TopupAllowed(u, billing.Balance(req.OrgID)+req.AmountEur) {
+			http.Error(w, "plafond de credits atteint pour un compte particulier (passez le compte en societe verifiee)", http.StatusForbidden)
+			return
+		}
+		adminBillingTopUp(billing).ServeHTTP(w, r)
+	})
 	http.HandleFunc("/admin/billing/refund", adminBillingRefund(billing))
 
 	// Sprint 14 : TLS optionnel. Si TLS_CERT_FILE et TLS_KEY_FILE sont

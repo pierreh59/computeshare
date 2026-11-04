@@ -44,6 +44,16 @@ type User struct {
 	SessionsBefore time.Time  `json:"-"`                     // epoque : sessions anterieures revoquees
 	DeletedAt      *time.Time `json:"deleted_at,omitempty"`  // compte supprime (anonymise)
 	CreatedAt      time.Time  `json:"created_at"`
+
+	// Sprint 15d : particulier vs societe (LAI-61). Les champs societe
+	// sont vides pour un particulier.
+	AccountType    string     `json:"account_type"`           // particulier | societe
+	CompanyName    string     `json:"company_name,omitempty"` // raison sociale
+	Siret          string     `json:"siret,omitempty"`       // 14 chiffres (cle Luhn)
+	VatNumber      string     `json:"vat_number,omitempty"`   // TVA intracom (FR...)
+	CompanyAddress string     `json:"company_address,omitempty"`
+	SiretVerified  bool       `json:"siret_verified"`         // verifie via API INSEE SIRENE
+	SiretCheckedAt *time.Time `json:"siret_checked_at,omitempty"`
 }
 
 // AccountStore : comptes + index email / jetons fournisseur / sessions.
@@ -98,6 +108,49 @@ func validPassword(p string) bool {
 	return len(p) >= 8 && len(p) <= 200
 }
 
+// validSiret : 14 chiffres + cle de controle Luhn (algorithme SIRET).
+func validSiret(s string) bool {
+	if len(s) != 14 {
+		return false
+	}
+	sum := 0
+	for i := 0; i < 14; i++ {
+		d := int(s[i] - '0')
+		if d < 0 || d > 9 {
+			return false
+		}
+		if i%2 == 0 { // positions paires (de gauche, 1er = 0) : x2
+			d *= 2
+			if d > 9 {
+				d -= 9
+			}
+		}
+		sum += d
+	}
+	return sum%10 == 0
+}
+
+// validVat : format TVA intracommunautaire simplifie (2 lettres pays +
+// 8-13 caracteres alphanumeriques). La verification approfondie VIES
+// est differee (apres CGU avocat).
+func validVat(v string) bool {
+	if len(v) < 3 || len(v) > 15 {
+		return false
+	}
+	for i := 0; i < 2; i++ {
+		if v[i] < 'A' || v[i] > 'Z' {
+			return false
+		}
+	}
+	for i := 2; i < len(v); i++ {
+		c := v[i]
+		if !(c >= '0' && c <= '9' || c >= 'A' && c <= 'Z') {
+			return false
+		}
+	}
+	return true
+}
+
 const maxLoginFails = 5
 const loginBlockTime = 15 * time.Minute
 
@@ -105,7 +158,8 @@ const loginBlockTime = 15 * time.Minute
 // confidentialite (RGPD art. 6/7). Retourne l'utilisateur, la cle API
 // (entreprise) ou le jeton de noeud personnel (fournisseur), et le
 // jeton de session.
-func (a *AccountStore) SignUp(email, password, role, name string, consent bool) (*User, string, string, int) {
+func (a *AccountStore) SignUp(email, password, role, name string, consent bool,
+	company *CompanyInfo) (*User, string, string, int) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	if !validEmail(email) || !validPassword(password) {
 		return nil, "", "", http.StatusBadRequest
@@ -115,6 +169,10 @@ func (a *AccountStore) SignUp(email, password, role, name string, consent bool) 
 	}
 	if !consent {
 		return nil, "", "", http.StatusForbidden
+	}
+	ci, code := normalizeCompany(company)
+	if code != 0 {
+		return nil, "", "", code
 	}
 
 	a.mu.Lock()
@@ -136,6 +194,15 @@ func (a *AccountStore) SignUp(email, password, role, name string, consent bool) 
 		ConsentAt:      time.Now(),
 		SessionsBefore: time.Unix(0, 0),
 		CreatedAt:      time.Now(),
+	}
+	if ci != nil {
+		u.AccountType = "societe"
+		u.CompanyName = ci.Name
+		u.Siret = ci.Siret
+		u.VatNumber = ci.Vat
+		u.CompanyAddress = ci.Address
+	} else {
+		u.AccountType = "particulier"
 	}
 	secret := ""
 	if role == "client" {
@@ -159,6 +226,9 @@ func (a *AccountStore) SignUp(email, password, role, name string, consent bool) 
 	a.byEmail[email] = u.ID
 	a.passwords[u.ID] = string(hash)
 	a.store.SaveUser(u, string(hash), hashKey(secret))
+	if ci != nil {
+		go a.verifySiret(u.ID) // verification INSEE SIRENE en tache de fond
+	}
 	return u, secret, a.newSession(u), http.StatusCreated
 }
 
@@ -268,7 +338,9 @@ func (a *AccountStore) SellerIDForToken(token string) string {
 
 // Restore recharge les comptes depuis la BDD au demarrage.
 func (a *AccountStore) Restore(id, email, pwHash, role, display, orgID, tokenHash string,
-	consentAt, sessionsBefore time.Time, deletedAt *time.Time) {
+	consentAt, sessionsBefore time.Time, deletedAt *time.Time,
+	accountType, companyName, siret, vat, companyAddr string,
+	siretVerified bool, siretCheckedAt *time.Time) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if deletedAt != nil {
@@ -277,6 +349,12 @@ func (a *AccountStore) Restore(id, email, pwHash, role, display, orgID, tokenHas
 	u := &User{
 		ID: id, Email: email, Role: role, DisplayName: display, OrgID: orgID,
 		ConsentAt: consentAt, SessionsBefore: sessionsBefore, CreatedAt: consentAt,
+		AccountType: accountType, CompanyName: companyName, Siret: siret,
+		VatNumber: vat, CompanyAddress: companyAddr,
+		SiretVerified: siretVerified, SiretCheckedAt: siretCheckedAt,
+	}
+	if u.AccountType == "" {
+		u.AccountType = "particulier"
 	}
 	if u.CreatedAt.IsZero() {
 		u.CreatedAt = time.Now()
@@ -311,6 +389,71 @@ func itoa(n int64) string {
 	return string(b[i:])
 }
 
+// CompanyInfo : infos societe saisies a l'inscription ou plus tard.
+type CompanyInfo struct {
+	Name    string `json:"name"`
+	Siret   string `json:"siret"`
+	Vat     string `json:"vat_number"`
+	Address string `json:"address"`
+}
+
+// normalizeCompany valide les infos societe. Retourne nil pour un
+// compte particulier ; un SIRET invalide ou une TVA mal formee
+// refusent la demande (400).
+func normalizeCompany(c *CompanyInfo) (*CompanyInfo, int) {
+	if c == nil {
+		return nil, 0
+	}
+	siret := strings.TrimSpace(c.Siret)
+	vat := strings.ToUpper(strings.TrimSpace(c.Vat))
+	if siret == "" {
+		return nil, 0 // rien de saisi : compte particulier
+	}
+	if !validSiret(siret) {
+		return nil, http.StatusBadRequest
+	}
+	if vat != "" && !validVat(vat) {
+		return nil, http.StatusBadRequest
+	}
+	return &CompanyInfo{
+		Name:    strings.TrimSpace(c.Name),
+		Siret:   siret,
+		Vat:     vat,
+		Address: strings.TrimSpace(c.Address),
+	}, 0
+}
+
+// Sprint 15d : limitations des comptes particuliers (non societe ou
+// societe non verifiee). Valeurs de beta, ajustables.
+const (
+	maxParticulierTopupEur    = 50.0  // solde max d'une entreprise particuliere
+	maxParticulierWithdrawMois = 100.0 // retraits max / 30 jours glissants
+	maxParticulierWithdrawTot  = 500.0 // retraits cumules max
+)
+
+// isParticulier : vrai si le compte n'est PAS une societe verifiee.
+func (u *User) isParticulier() bool {
+	return u.AccountType != "societe" || !u.SiretVerified
+}
+
+// TopupAllowed : un particulier (societe non verifiee incluse) ne peut
+// pas recharger au-dela de maxParticulierTopupEur.
+func TopupAllowed(u *User, balanceAfter float64) bool {
+	if u == nil || !u.isParticulier() {
+		return true
+	}
+	return balanceAfter <= maxParticulierTopupEur
+}
+
+// WithdrawAllowed : un particulier plafonne ses retraits mensuels et
+// cumules. Les societes verifiees ne sont pas limitees ici.
+func WithdrawAllowed(u *User, last30d, total float64) bool {
+	if u == nil || !u.isParticulier() {
+		return true
+	}
+	return last30d <= maxParticulierWithdrawMois && total <= maxParticulierWithdrawTot
+}
+
 // fmtSscan evite d'importer fmt juste pour deux ParseInt.
 func fmtSscan(s string, dst *int64) (int, error) {
 	n := int64(0)
@@ -330,6 +473,59 @@ func (e sscanErr) Error() string { return string(e) }
 
 const errBadDigit = sscanErr("chiffre invalide")
 
+// UserByOrg retrouve le compte entreprise a partir de son org B2B
+// (Sprint 15d : plafond de credits des particuliers).
+func (a *AccountStore) UserByOrg(orgID string) *User {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	for _, u := range a.users {
+		if u.OrgID == orgID {
+			return u
+		}
+	}
+	return nil
+}
+
+// UserByID retrouve un compte par son identifiant.
+func (a *AccountStore) UserByID(id string) *User {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.users[id]
+}
+
+// SetCompany met a jour le statut particulier/societe et les infos
+// societe d'un compte (Sprint 15d). company == nil => passage en
+// particulier (les donnees societe sont effacees, RGPD).
+func (a *AccountStore) SetCompany(userID string, company *CompanyInfo) (*User, int) {
+	ci, code := normalizeCompany(company)
+	if code != 0 {
+		return nil, code
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	u, ok := a.users[userID]
+	if !ok {
+		return nil, http.StatusNotFound
+	}
+	if ci == nil {
+		u.AccountType = "particulier"
+		u.CompanyName, u.Siret, u.VatNumber, u.CompanyAddress = "", "", "", ""
+		u.SiretVerified = false
+		u.SiretCheckedAt = nil
+	} else {
+		u.AccountType = "societe"
+		u.CompanyName, u.Siret, u.VatNumber, u.CompanyAddress =
+			ci.Name, ci.Siret, ci.Vat, ci.Address
+		u.SiretVerified = false // le nouveau SIRET doit etre reverifie
+		u.SiretCheckedAt = nil
+	}
+	a.store.SaveUserCompany(u)
+	if ci != nil {
+		go a.verifySiret(userID)
+	}
+	return u, 0
+}
+
 // ---- Handlers HTTP ----
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
@@ -343,17 +539,18 @@ func (a *AccountStore) handleSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-		Role     string `json:"role"`
-		Name     string `json:"name"`
-		Consent  bool   `json:"consent"`
+		Email    string       `json:"email"`
+		Password string       `json:"password"`
+		Role     string       `json:"role"`
+		Name     string       `json:"name"`
+		Consent  bool         `json:"consent"`
+		Company  *CompanyInfo `json:"company"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid")
 		return
 	}
-	u, secret, session, code := a.SignUp(req.Email, req.Password, req.Role, req.Name, req.Consent)
+	u, secret, session, code := a.SignUp(req.Email, req.Password, req.Role, req.Name, req.Consent, req.Company)
 	if code == http.StatusConflict {
 		writeErr(w, code, "email deja utilise")
 		return
@@ -555,6 +752,12 @@ func (a *AccountStore) handleExport(reg *Registry, wallet *Wallet, billing *Bill
 				"id": u.ID, "email": u.Email, "display_name": u.DisplayName,
 				"role": u.Role, "created_at": u.CreatedAt,
 				"consent_at": u.ConsentAt,
+				"account_type": u.AccountType,
+				"company": map[string]interface{}{
+					"name": u.CompanyName, "siret": u.Siret,
+					"vat_number": u.VatNumber, "address": u.CompanyAddress,
+					"siret_verified": u.SiretVerified,
+				},
 			},
 		}
 		if u.Role == "client" && u.OrgID != "" {
@@ -582,6 +785,29 @@ func (a *AccountStore) handleExport(reg *Registry, wallet *Wallet, billing *Bill
 		w.Header().Set("Content-Disposition", "attachment; filename=computeshare-export.json")
 		writeJSON(w, out)
 	}
+}
+
+// POST /auth/company : declaration ou mise a jour du statut societe
+// (Sprint 15d). Body : {"company": {name, siret, vat_number, address}}
+// ou {"company": null} pour repasser en particulier.
+func (a *AccountStore) handleCompany(w http.ResponseWriter, r *http.Request, u *User) {
+	if r.Method != "POST" {
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req struct {
+		Company *CompanyInfo `json:"company"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid")
+		return
+	}
+	updated, code := a.SetCompany(u.ID, req.Company)
+	if updated == nil {
+		writeErr(w, code, "siret ou numero de TVA invalide")
+		return
+	}
+	writeJSON(w, updated)
 }
 
 // DELETE /auth/account {password} : droit a l'effacement RGPD.
@@ -619,6 +845,9 @@ func (a *AccountStore) handleDeleteAccount(reg *Registry) func(http.ResponseWrit
 		u.Email = u.ID + "@supprime.local"
 		u.DisplayName = "Compte supprime"
 		u.OrgID = ""
+		u.AccountType = "particulier"
+		u.CompanyName, u.Siret, u.VatNumber, u.CompanyAddress = "", "", "", ""
+		u.SiretVerified = false
 		u.DeletedAt = &now
 		a.store.SaveUserDeleted(u)
 		a.mu.Unlock()
