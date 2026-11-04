@@ -62,7 +62,6 @@ function requireRole(role){
 function logout(){localStorage.removeItem('cs-session');localStorage.removeItem('cs-user');location.href='/login';}
 function fmtEur(v){return (Math.round(v*1000000)/1000000).toFixed(6)+' EUR';}
 function esc(s){var d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;}
-</script>
 
 // Sprint 15c : carte de gestion de compte (RGPD).
 function renderAccountCard(){
