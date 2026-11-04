@@ -13,7 +13,7 @@ CREATE TABLE runtime_ledger (
     node_id    TEXT        NOT NULL,
     entry_type TEXT        NOT NULL,  -- payout | withdrawal | fee
     amount_eur NUMERIC(12,6) NOT NULL,
-    ref        TEXT        NOT NULL DEFAULT '',  -- chunk_id ou withdrawal_id
+    ref        TEXT        NOT NULL DEFAULT ''   -- chunk_id ou withdrawal_id
 );
 CREATE INDEX idx_runtime_ledger_node ON runtime_ledger (node_id, at);
 
