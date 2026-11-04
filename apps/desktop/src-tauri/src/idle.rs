@@ -17,7 +17,7 @@ pub struct IdleStatus {
     pub game_detected: bool,
 }
 
-const USER_IDLE_THRESHOLD_SECS: u64 = 300;   // 5 min sans souris/clavier
+const USER_IDLE_THRESHOLD_SECS: u64 = 60;    // dev : 1 min sans souris/clavier
 const CPU_BUSY_THRESHOLD: f32 = 60.0;       // charge CPU au-dela = machine occupee
 const GPU_BUSY_THRESHOLD: u32 = 50;        // charge GPU au-dela = jeu ou rendu
 

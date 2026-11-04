@@ -34,7 +34,9 @@ const DEFAULT_TIMEOUT_SECS: u64 = 300;
 const MAX_TIMEOUT_SECS: u64 = 3600;
 
 /// Seules ces commandes peuvent tourner. Tout le reste est rejete.
-const ALLOWED: [&str; 2] = ["compute_worker.exe", "ffmpeg.exe"];
+/// "echo" est autorise pour les jobs de demonstration : builtin du
+/// shell, il est execute via cmd/sh avec redirection du resultat.
+const ALLOWED: [&str; 3] = ["compute_worker.exe", "ffmpeg.exe", "echo"];
 
 fn sanitize_id(id: &str) -> String {
     id.chars()
@@ -80,8 +82,52 @@ pub fn run_chunk(spec: ChunkSpec) -> ChunkResult {
         Duration::from_secs(spec.timeout_secs.min(MAX_TIMEOUT_SECS))
     };
 
-    let child = match Command::new(&spec.command)
-        .args(&spec.args)
+    // Fichier resultat : celui du job, ou nom par defaut si le client
+    // n'en a pas precise (la console ne le fait pas).
+    let out_name: String = if spec.expected_output.is_empty() {
+        "output.txt".to_string()
+    } else {
+        spec.expected_output
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '-' || *c == '_')
+            .take(64)
+            .collect()
+    };
+
+    // Construction du process : "echo" est un builtin du shell, pas un
+    // executable -> passage par cmd (Windows) ou sh (Unix) avec
+    // redirection explicite vers le fichier resultat. Les metacaracteres
+    // dans les arguments sont rejetes (pas d'injection shell).
+    let builder: std::process::Command = if spec.command == "echo" {
+        for a in &spec.args {
+            if a.chars().any(|c| "&|<>\"'^%".contains(c)) {
+                return mk("rejected", "argument interdit pour echo", None);
+            }
+        }
+        #[cfg(windows)]
+        {
+            let mut b = Command::new("cmd");
+            b.arg("/C").arg("echo");
+            for a in &spec.args {
+                b.arg(a);
+            }
+            b.arg(">").arg(&out_name);
+            b
+        }
+        #[cfg(not(windows))]
+        {
+            let line = format!("echo {} > {}", spec.args.join(" "), out_name);
+            let mut b = Command::new("sh");
+            b.arg("-c").arg(line);
+            b
+        }
+    } else {
+        let mut b = Command::new(&spec.command);
+        b.args(&spec.args);
+        b
+    };
+
+    let child = match builder
         .current_dir(&dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -113,7 +159,7 @@ pub fn run_chunk(spec: ChunkSpec) -> ChunkResult {
     if !output.status.success() {
         return mk("failed", &tail_utf8(&output.stderr), None);
     }
-    let out_path = dir.join(&spec.expected_output);
+    let out_path = dir.join(&out_name);
     match hash_file(&out_path) {
         Some(sha) => mk("ok", "chunk termine", Some(sha)),
         None => mk("bad_output", "fichier resultat manquant", None),
