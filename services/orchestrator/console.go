@@ -46,6 +46,7 @@ const consoleHTML = `<!DOCTYPE html>
  <label>Commande</label><input id="cmd" value="echo">
  <label>Arguments (separes par des espaces)</label><input id="args" value="hello">
  <label>Nombre de taches</label><input id="count" value="4">
+ <label>Nom du fichier resultat (ex: out.mp4)</label><input id="outname" value="out.mp4">
  <label>Duree estimee par tache (heures GPU, pour la simulation de cout)</label><input id="hours" value="1">
  <label>Categorie GPU estimee (consumer / prosumer / high_end)</label><input id="cat" value="prosumer">
  <button onclick="estimate()">Simuler le cout</button>
@@ -92,7 +93,8 @@ function estimate(){
 }
 function submitJob(){
   var body={id:jid(),command:cmd_(),args:document.getElementById('args').value.split(' ').filter(Boolean),
-   task_count:parseInt(document.getElementById('count').value)||1,timeout_secs:600};
+   task_count:parseInt(document.getElementById('count').value)||1,timeout_secs:600,
+   output_name:document.getElementById('outname').value.trim()};
   api('/v1/jobs',{method:'POST',body:JSON.stringify(body)}).then(function(r){
     log('Job <b>'+r.job_id+'</b> soumis ('+r.task_count+' taches).','ok');
     startTracking(body.id);
