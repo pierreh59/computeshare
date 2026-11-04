@@ -5,7 +5,7 @@
 -- jeton d'enrolement personnel (remplace le jeton partage de la beta
 -- ferme pour les comptes crees via inscription).
 
-CREATE TABLE runtime_users (
+CREATE TABLE IF NOT EXISTS runtime_users (
     id                TEXT PRIMARY KEY,
     email             TEXT NOT NULL UNIQUE,
     password_hash     TEXT NOT NULL,             -- bcrypt
@@ -15,7 +15,7 @@ CREATE TABLE runtime_users (
     seller_token_hash TEXT NOT NULL DEFAULT '', -- role vendeur : SHA-256 du jeton personnel
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_runtime_users_email ON runtime_users (email);
+CREATE INDEX IF NOT EXISTS idx_runtime_users_email ON runtime_users (email);
 
 -- Le noeud connait son compte vendeur (console vendeur, retraits KYC).
-ALTER TABLE runtime_nodes ADD COLUMN user_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE runtime_nodes ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT '';

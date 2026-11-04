@@ -38,7 +38,9 @@ services:
       retries: 10
     restart: unless-stopped
 
-  # Applique toutes les migrations dans l'ordre, puis se termine.
+  # Applique les migrations non deja passees, puis se termine.
+  # Un registre (migrations_applied) trace ce qui est applique :
+  # redemarrer la stack ne rejoue jamais une migration passee.
   # Meme regle que la CI : une migration qui casse bloque le demarrage.
   migrate:
     image: postgres:16-alpine
@@ -51,9 +53,25 @@ services:
       - |
         set -e
         echo "Application des migrations..."
+        psql -h db -U computeshare -d computeshare -c "CREATE TABLE IF NOT EXISTS migrations_applied (name TEXT PRIMARY KEY, at TIMESTAMPTZ NOT NULL DEFAULT now())" >/dev/null
+        # Base pre-existante (deploy initial avant le registre) :
+        # marquer 001-007 comme appliquees selon la presence de leurs objets.
+        psql -h db -U computeshare -d computeshare -c "INSERT INTO migrations_applied (name) SELECT '001_schema.sql' WHERE EXISTS (SELECT FROM information_schema.tables WHERE table_name='gpu_categories') ON CONFLICT DO NOTHING" >/dev/null
+        psql -h db -U computeshare -d computeshare -c "INSERT INTO migrations_applied (name) SELECT '002_mvp_runtime.sql' WHERE EXISTS (SELECT FROM information_schema.tables WHERE table_name='runtime_nodes') ON CONFLICT DO NOTHING" >/dev/null
+        psql -h db -U computeshare -d computeshare -c "INSERT INTO migrations_applied (name) SELECT '003_api_keys.sql' WHERE EXISTS (SELECT FROM information_schema.tables WHERE table_name='runtime_orgs') ON CONFLICT DO NOTHING" >/dev/null
+        psql -h db -U computeshare -d computeshare -c "INSERT INTO migrations_applied (name) SELECT '004_objectstore_reschedule.sql' WHERE EXISTS (SELECT FROM information_schema.tables WHERE table_name='runtime_assets') ON CONFLICT DO NOTHING" >/dev/null
+        psql -h db -U computeshare -d computeshare -c "INSERT INTO migrations_applied (name) SELECT '005_antifraud.sql' WHERE EXISTS (SELECT FROM information_schema.columns WHERE table_name='runtime_nodes' AND column_name='machine_fingerprint') ON CONFLICT DO NOTHING" >/dev/null
+        psql -h db -U computeshare -d computeshare -c "INSERT INTO migrations_applied (name) SELECT '006_wallet.sql' WHERE EXISTS (SELECT FROM information_schema.tables WHERE table_name='runtime_ledger') ON CONFLICT DO NOTHING" >/dev/null
+        psql -h db -U computeshare -d computeshare -c "INSERT INTO migrations_applied (name) SELECT '007_billing.sql' WHERE EXISTS (SELECT FROM information_schema.tables WHERE table_name='runtime_billing_events') ON CONFLICT DO NOTHING" >/dev/null
         for f in /migrations/*.sql; do
-          echo "== $$f"
-          psql -h db -U computeshare -d computeshare -v ON_ERROR_STOP=1 -f "$$f"
+          n=$$(basename "$$f")
+          if psql -h db -U computeshare -d computeshare -tA -c "SELECT 1 FROM migrations_applied WHERE name='$$n'" | grep -q 1; then
+            echo "== $$n (deja appliquee)"
+          else
+            echo "== $$f"
+            psql -h db -U computeshare -d computeshare -v ON_ERROR_STOP=1 -f "$$f"
+            psql -h db -U computeshare -d computeshare -c "INSERT INTO migrations_applied (name) VALUES ('$$n') ON CONFLICT DO NOTHING" >/dev/null
+          fi
         done
         echo "Migrations OK."
     depends_on:
