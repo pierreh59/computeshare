@@ -76,7 +76,12 @@ fn node_loop(gateway: String, node_id: String) {
     loop {
         // 1. Register : idempotent, met a jour LastSeen = heartbeat.
         match crate::http::post_json(&gateway, "/register", &register_body) {
-            Some(r) if r.status == 200 => (),
+            Some(r) if r.status == 200 => {
+                // Un register reussi efface l'erreur precedente : sans
+                // cela, "gateway injoignable" restait affiche meme apres
+                // une reconnexion reussie.
+                status_cell().lock().unwrap().last_error.clear();
+            }
             Some(r) => set_error(&format!("register: HTTP {}", r.status)),
             None => set_error("gateway injoignable"),
         }

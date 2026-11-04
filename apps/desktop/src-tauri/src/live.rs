@@ -1,9 +1,10 @@
 //! LAI-23 - Stats temps reel du noeud fournisseur.
-//! Gains estimes, charge GPU, temperature, statut minage.
+//! Gains REELS depuis le wallet de la gateway (LAI-34), charge GPU,
+//! temperature, statut minage.
 
 use serde::Serialize;
 use std::sync::{Mutex, OnceLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use nvml_wrapper::enum_wrappers::device::TemperatureSensor;
 
 #[derive(Serialize)]
@@ -16,23 +17,39 @@ pub struct LiveStats {
     pub uptime_secs: u64,
 }
 
-// Taux indicatif en EUR/s a pleine charge GPU.
-// Sera remplace par le moteur de tarification (LAI-51) avant la beta.
-const RATE_EUR_PER_SEC: f64 = 0.00003;
-
-fn earnings_cell() -> &'static Mutex<f64> {
-    static CELL: OnceLock<Mutex<f64>> = OnceLock::new();
-    CELL.get_or_init(|| Mutex::new(0.0))
-}
-
-fn last_call() -> &'static Mutex<Option<Instant>> {
-    static CELL: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
-    CELL.get_or_init(|| Mutex::new(None))
+// Cache du solde wallet : requete a la gateway au plus toutes les 10 s
+// (l'UI raffraichit toutes les 2 s), dernier solde connu sinon.
+// (f64, Option<Instant>) : solde connu, instant du dernier essai.
+fn wallet_cache() -> &'static Mutex<(f64, Option<Instant>)> {
+    static CELL: OnceLock<Mutex<(f64, Option<Instant>)>> = OnceLock::new();
+    CELL.get_or_init(|| Mutex::new((0.0, None)))
 }
 
 fn boot() -> &'static Instant {
     static CELL: OnceLock<Instant> = OnceLock::new();
     CELL.get_or_init(Instant::now)
+}
+
+/// Solde reel du vendeur, depuis GET /wallet?node_id=X de la gateway.
+/// Retourne le dernier solde connu si la gateway ne repond pas.
+fn wallet_earnings() -> f64 {
+    let st = crate::node::node_status();
+    let now = Instant::now();
+    let mut cell = wallet_cache().lock().unwrap();
+    let due = cell.1.map(|t| t.elapsed() >= Duration::from_secs(10)).unwrap_or(true);
+    if st.running && due {
+        cell.1 = Some(now); // marque l'essai, reussi ou non
+        if let Some(r) = crate::http::get(&st.gateway, &format!("/wallet?node_id={}", st.node_id)) {
+            if r.status == 200 {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&r.body) {
+                    if let Some(b) = v["balance"].as_f64() {
+                        cell.0 = b;
+                    }
+                }
+            }
+        }
+    }
+    cell.0
 }
 
 #[tauri::command]
@@ -50,27 +67,12 @@ pub fn get_live_stats() -> LiveStats {
         Err(_) => (0, 0),
     };
 
-    // Temps ecoule depuis l'appel precedent (donc depuis le dernier refresh UI).
-    let now = Instant::now();
-    let dt = {
-        let mut last = last_call().lock().unwrap();
-        let dt = last.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0);
-        *last = Some(now);
-        dt.min(10.0) // garde-fou si l'UI a ete gele longtemps
-    };
-
-    // Accumulation des gains : seulement pendant le minage.
-    let mut earn = earnings_cell().lock().unwrap();
-    if idle.should_mine {
-        *earn += (gpu_load as f64 / 100.0) * dt * RATE_EUR_PER_SEC;
-    }
-
     LiveStats {
         gpu_load,
         gpu_temp_c: gpu_temp,
         cpu_load: idle.cpu_load,
         should_mine: idle.should_mine,
-        earnings_eur: *earn,
+        earnings_eur: wallet_earnings(),
         uptime_secs: boot().elapsed().as_secs(),
     }
 }

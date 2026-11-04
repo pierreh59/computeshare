@@ -5,7 +5,13 @@
     if (!window.__TAURI__) throw new Error("API Tauri indisponible (withGlobalTauri ou capabilities manquants)");
     const inv = window.__TAURI__.core.invoke;
 const hw = await inv("detect_hardware");
-const nodeId = "node-" + Math.random().toString(16).slice(2, 8);
+// Identite stable du noeud : sans elle, chaque lancement creait un nouveau
+// node_id et le wallet (associe au node_id) repartait de zero.
+let nodeId = localStorage.getItem("cs-node-id");
+if (!nodeId) {
+  nodeId = "node-" + Math.random().toString(16).slice(2, 8);
+  localStorage.setItem("cs-node-id", nodeId);
+}
 
 document.querySelector("#app").innerHTML = `
   <h1>ComputeShare</h1>
