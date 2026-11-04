@@ -1,8 +1,6 @@
-//! Client HTTP minimal pour le MVP : gateway en HTTP local uniquement.
-//! Sera remplace par un client avec TLS (ureq) avant la beta.
-
-use std::io::{Read, Write};
-use std::net::TcpStream;
+//! Client HTTP(S) du noeud : ureq + TLS (rustls), remplace le client
+//! TCP brut de dev qui ne savait pas parler HTTPS (beta LAI-12).
+//! Meme interface publique que l'ancien : get / post_json / Response.
 
 pub struct Response {
     pub status: u16,
@@ -15,35 +13,37 @@ fn node_token() -> String {
     std::env::var("COMPUTERSHARE_NODE_TOKEN").unwrap_or_else(|_| "dev-node-token".to_string())
 }
 
-/// "http://localhost:8080" -> ("localhost", 8080)
-pub fn split_url(url: &str) -> (String, u16) {
-    let cleaned = url.trim().trim_start_matches("http://").trim_end_matches('/');
-    match cleaned.rsplit_once(':') {
-        Some((h, p)) => (h.to_string(), p.parse().unwrap_or(80)),
-        None => (cleaned.to_string(), 80),
-    }
+/// Construit l'URL complete depuis la gateway et le chemin.
+/// "https://api.computeshare.fr" + "/register" -> "https://api.computeshare.fr/register"
+fn full_url(url: &str, path: &str) -> String {
+    format!("{}/{}", url.trim().trim_end_matches('/'), path)
+}
+
+fn agent() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .timeout_connect(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
 }
 
 fn request(method: &str, url: &str, path: &str, body: Option<&str>) -> Option<Response> {
-    let (host, port) = split_url(url);
-    let mut stream = TcpStream::connect((host.as_str(), port)).ok()?;
-    let req = match body {
-        Some(b) => format!(
-            "{} {} HTTP/1.1\r\nHost: {}\r\nX-Node-Token: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            method, path, host, node_token(), b.len(), b
-        ),
-        None => format!(
-            "{} {} HTTP/1.1\r\nHost: {}\r\nX-Node-Token: {}\r\nConnection: close\r\n\r\n",
-            method, path, host, node_token()
-        ),
+    let url = full_url(url, path);
+    let call = agent().request(method, &url)
+        .set("X-Node-Token", &node_token());
+    let resp = match body {
+        Some(b) => call.set("Content-Type", "application/json").send_string(b),
+        None => call.call(),
     };
-    stream.write_all(req.as_bytes()).ok()?;
-    let mut raw = Vec::new();
-    stream.read_to_end(&mut raw).ok()?;
-    let text = String::from_utf8_lossy(&raw).to_string();
-    let status = text.get(9..12)?.parse().ok()?;
-    let split = text.find("\r\n\r\n")?;
-    Some(Response { status, body: text[split + 4..].to_string() })
+    // Les reponses d'erreur HTTP (4xx/5xx) restent des reponses :
+    // on garde le status et le corps pour que l'appelant decide.
+    let resp = match resp {
+        Ok(r) => r,
+        Err(ureq::Error::Status(_, r)) => r,
+        Err(_) => return None, // reseau injoignable (DNS, TLS, timeout)
+    };
+    let status = resp.status();
+    let body = resp.into_string().unwrap_or_default();
+    Some(Response { status, body })
 }
 
 pub fn get(url: &str, path: &str) -> Option<Response> {

@@ -16,7 +16,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://localhost:8081 https://gateway.computeshare.dev wss://gateway.computeshare.dev"
+      "csp": "default-src 'self'; connect-src 'self' http://localhost:8081 https://api.computeshare.fr"
     }
   },
   "bundle": {
