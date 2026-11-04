@@ -21,17 +21,23 @@ document.querySelector("#app").innerHTML = `
       <div class="cs-stat-value" id="mine">PAUSE</div></div>
   </div>
   <div style="margin-top:16px">
-    <input id="gw" value="http://localhost:8080" size="24">
+    <input id="gw" value="http://localhost:8081" size="24">
     <button id="start">Demarrer le noeud (${nodeId})</button>
     <span id="nodeinfo" style="margin-left:8px"></span>
   </div>
   <p id="state" style="margin-top:16px">...</p>
 `;
 
+// La gateway survit aux redemarrages de l'app (localStorage).
+const savedGw = localStorage.getItem("cs-gateway");
+if (savedGw) document.querySelector("#gw").value = savedGw;
+
 document.querySelector("#start").onclick = async () => {
   try {
+    const gw = document.querySelector("#gw").value.trim();
+    localStorage.setItem("cs-gateway", gw);
     await inv("start_node", {
-      gateway: document.querySelector("#gw").value,
+      gateway: gw,
       nodeId: nodeId,
     });
     document.querySelector("#start").disabled = true;
