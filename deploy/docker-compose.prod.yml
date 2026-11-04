@@ -15,6 +15,7 @@ services:
       DATABASE_URL: postgres://computeshare:${POSTGRES_PASSWORD}@db:5432/computeshare?sslmode=disable
       ADMIN_KEY: ${ADMIN_KEY}
       NODE_ENROLLMENT_TOKEN: ${NODE_ENROLLMENT_TOKEN}
+      SESSION_SECRET: ${SESSION_SECRET:-}
     depends_on:
       db:
         condition: service_healthy

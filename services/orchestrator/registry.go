@@ -10,6 +10,7 @@ import (
 // Node represente un noeud enregistre avec sa derniere presence.
 type Node struct {
 	ID          string    `json:"id"`
+	UserID      string    `json:"-"` // compte vendeur proprietaire (Sprint 15)
 	GPUModel    string    `json:"gpu_model"`
 	GPUCategory string    `json:"gpu_category"`
 	Zone        string    `json:"zone"`
@@ -181,4 +182,21 @@ func (r *Registry) reaperLoop() {
 func writeJSON(w http.ResponseWriter, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
+}
+
+// BindSeller lie un noeud a son compte vendeur (Sprint 15). Appelle au
+// register quand le jeton d'enrolement est personnel. Stable : le
+// premier lien gagne (un jeton vole ne redefinit pas le proprietaire).
+func (r *Registry) BindSeller(nodeID, userID string) {
+	if userID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n, ok := r.nodes[nodeID]
+	if !ok || n.UserID != "" {
+		return
+	}
+	n.UserID = userID
+	r.store.SaveNode(n)
 }

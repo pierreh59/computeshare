@@ -25,7 +25,10 @@ func main() {
 	billing := NewBilling(store)
 	chunker := NewChunker(registry, pricing, store, fraud, wallet, billing)
 	orgs := NewOrgStore(store)
+	accounts := NewAccountStore(store, orgs)
+	nodeAuth := NewNodeAuth(accounts)
 	store.LoadAll(registry, pricing, chunker, orgs)
+	store.LoadUsers(accounts)
 	store.LoadWallet(wallet)
 	store.LoadBilling(billing)
 	wallet.Start()
@@ -36,9 +39,16 @@ func main() {
 	http.HandleFunc("/nodes", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, registry.OnlineNodes())
 	})
+
+	// Sprint 15 (LAI-57) : comptes utilisateurs - inscription libre et
+	// connexion, cote clients ET cote vendeurs.
+	http.HandleFunc("/auth/signup", accounts.handleSignup)
+	http.HandleFunc("/auth/login", accounts.handleLogin)
+	http.HandleFunc("/auth/me", accounts.handleMe)
+	http.HandleFunc("/auth/seller-token", accounts.handleSellerToken)
 	// Sprint 14 : les endpoints noeuds sont proteges par le jeton
 	// d'enrolement (en-tete X-Node-Token, cf. nodeauth.go).
-	http.HandleFunc("/register", withNodeToken(func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/register", nodeAuth.withNodeToken(func(w http.ResponseWriter, r *http.Request, sellerID string) {
 		var msg struct {
 			NodeID             string `json:"node_id"`
 			GPUModel           string `json:"gpu_model"`
@@ -52,13 +62,22 @@ func main() {
 		}
 		writeJSON(w, registry.Register(msg.NodeID, msg.GPUModel,
 			msg.GPUCategory, msg.Zone, msg.MachineFingerprint))
+		// Sprint 15 : jeton personnel -> le noeud devient la
+		// propriete du compte vendeur.
+		if sellerID != "" {
+			registry.BindSeller(msg.NodeID, sellerID)
+		}
 	}))
-	http.HandleFunc("/ws", withNodeToken(func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/ws", nodeAuth.withNodeToken(func(w http.ResponseWriter, r *http.Request, _ string) {
 		nodeWS(registry, hub, w, r)
 	}))
 	http.HandleFunc("/jobs", submitJob(chunker))
-	http.HandleFunc("/chunks", withNodeToken(nextChunk(chunker)))
-	http.HandleFunc("/chunk_result", withNodeToken(completeChunk(chunker)))
+	http.HandleFunc("/chunks", nodeAuth.withNodeToken(func(w http.ResponseWriter, r *http.Request, _ string) {
+		nextChunk(chunker).ServeHTTP(w, r)
+	}))
+	http.HandleFunc("/chunk_result", nodeAuth.withNodeToken(func(w http.ResponseWriter, r *http.Request, _ string) {
+		completeChunk(chunker).ServeHTTP(w, r)
+	}))
 
 	// LAI-51/52 : console admin (cle via en-tete X-Admin-Key).
 	http.HandleFunc("/admin/pricing", func(w http.ResponseWriter, r *http.Request) {

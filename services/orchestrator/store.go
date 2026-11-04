@@ -68,17 +68,18 @@ func (s *Store) SaveNode(n *Node) {
 	}
 	_, err := s.db.Exec(`INSERT INTO runtime_nodes
 		(id, gpu_model, gpu_category, zone, machine_fingerprint,
-		 trust_score, status, last_seen, online)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		 trust_score, status, last_seen, online, user_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 		ON CONFLICT (id) DO UPDATE SET
 		  gpu_model=EXCLUDED.gpu_model,
 		  gpu_category=EXCLUDED.gpu_category,
 		  zone=EXCLUDED.zone,
 		  machine_fingerprint=EXCLUDED.machine_fingerprint,
 		  last_seen=EXCLUDED.last_seen,
-		  online=EXCLUDED.online`,
+		  online=EXCLUDED.online,
+		  user_id=EXCLUDED.user_id`,
 		n.ID, n.GPUModel, n.GPUCategory, n.Zone, n.MachineFingerprint,
-		n.TrustScore, n.Status, n.LastSeen, n.Online)
+		n.TrustScore, n.Status, n.LastSeen, n.Online, n.UserID)
 	if err != nil {
 		log.Printf("store.SaveNode: %v", err)
 	}
@@ -415,15 +416,19 @@ func (s *Store) LoadAll(reg *Registry, pricing *Pricing, chunker *Chunker, orgs 
 	// 2. Noeuds connus (hors ligne jusqu'a re-enregistrement).
 	rows, err = s.db.Query(`SELECT id, gpu_model, gpu_category,
 		trust_score, status, zone,
-		COALESCE(machine_fingerprint, '') FROM runtime_nodes`)
+		COALESCE(machine_fingerprint, ''),
+		COALESCE(user_id, '') FROM runtime_nodes`)
 	if err != nil {
 		log.Printf("store.LoadAll(nodes): %v", err)
 	} else {
 		for rows.Next() {
-			var id, model, cat, status, zone, fingerprint string
+			var id, model, cat, status, zone, fingerprint, userID string
 			var trust float64
-			if rows.Scan(&id, &model, &cat, &trust, &status, &zone, &fingerprint) == nil {
+			if rows.Scan(&id, &model, &cat, &trust, &status, &zone, &fingerprint, &userID) == nil {
 				reg.Restore(id, model, cat, trust, status, zone, fingerprint)
+				if userID != "" {
+					reg.BindSeller(id, userID)
+				}
 			}
 		}
 		rows.Close()
@@ -484,4 +489,63 @@ func (s *Store) LoadAll(reg *Registry, pricing *Pricing, chunker *Chunker, orgs 
 	}
 	log.Printf("store: etat recharge depuis PostgreSQL (%s)",
 		time.Now().Format("15:04:05"))
+}
+
+// ---- Sprint 15 : comptes utilisateurs (LAI-57) ----
+
+// SaveUser enregistre un compte (idempotent). tokenHash : SHA-256 du
+// jeton de noeud personnel (vide pour les clients).
+func (s *Store) SaveUser(u *User, pwHash, tokenHash string) {
+	if !s.enabled() {
+		return
+	}
+	_, err := s.db.Exec(`INSERT INTO runtime_users
+		(id, email, password_hash, role, display_name, org_id,
+		 seller_token_hash, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		ON CONFLICT (id) DO UPDATE SET
+		  email=EXCLUDED.email,
+		  password_hash=EXCLUDED.password_hash,
+		  display_name=EXCLUDED.display_name,
+		  org_id=EXCLUDED.org_id,
+		  seller_token_hash=EXCLUDED.seller_token_hash`,
+		u.ID, u.Email, pwHash, u.Role, u.DisplayName, u.OrgID,
+		tokenHash, u.CreatedAt)
+	if err != nil {
+		log.Printf("store.SaveUser: %v", err)
+	}
+}
+
+// SaveSellerToken met a jour le jeton de noeud d'un vendeur (rotation).
+func (s *Store) SaveSellerToken(userID, tokenHash string) {
+	if !s.enabled() {
+		return
+	}
+	_, err := s.db.Exec(
+		`UPDATE runtime_users SET seller_token_hash=$2 WHERE id=$1`,
+		userID, tokenHash)
+	if err != nil {
+		log.Printf("store.SaveSellerToken: %v", err)
+	}
+}
+
+// LoadUsers recharge les comptes au demarrage.
+func (s *Store) LoadUsers(a *AccountStore) {
+	if !s.enabled() {
+		return
+	}
+	rows, err := s.db.Query(`SELECT id, email, password_hash, role,
+		COALESCE(display_name, ''), COALESCE(org_id, ''),
+		COALESCE(seller_token_hash, '') FROM runtime_users`)
+	if err != nil {
+		log.Printf("store.LoadUsers: %v", err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, email, pwHash, role, display, orgID, tokenHash string
+		if rows.Scan(&id, &email, &pwHash, &role, &display, &orgID, &tokenHash) == nil {
+			a.Restore(id, email, pwHash, role, display, orgID, tokenHash)
+		}
+	}
 }
