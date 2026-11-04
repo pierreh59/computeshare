@@ -6,86 +6,205 @@
 <title>ComputeShare - La puissance de calcul GPU des particuliers, au service des entreprises</title>
 <meta name="description" content="Marketplace de calcul distribue : les entreprises soumettent leurs jobs GPU a prix reduit, les particuliers louent la puissance oisive de leur machine.">
 <style>
-  :root { --green:#16a34a; --dark:#0f172a; --gray:#64748b; }
+  :root {
+    --bg:#0a0f1e; --panel:#0f1629; --line:#1e293b;
+    --green:#22c55e; --green2:#4ade80; --cyan:#22d3ee;
+    --text:#e2e8f0; --muted:#8b9bb4;
+  }
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:system-ui,-apple-system,sans-serif; color:var(--dark); line-height:1.6; }
-  header { background:linear-gradient(135deg,#064e3b,#16a34a); color:#fff; padding:90px 20px; text-align:center; }
-  h1 { font-size:2.4rem; max-width:800px; margin:0 auto 16px; }
-  .sub { font-size:1.15rem; opacity:.92; max-width:640px; margin:0 auto 28px; }
-  .btn { display:inline-block; background:#fff; color:var(--green); text-decoration:none; font-weight:600; padding:12px 28px; border-radius:8px; }
-  section { max-width:900px; margin:0 auto; padding:60px 20px; }
-  h2 { font-size:1.6rem; margin-bottom:24px; }
-  .cols { display:grid; grid-template-columns:1fr 1fr; gap:24px; }
-  .card { border:1px solid #e2e8f0; border-radius:12px; padding:24px; }
-  .card h3 { margin-bottom:12px; }
-  .card ul { padding-left:20px; color:var(--gray); }
-  .stat { text-align:center; font-size:2rem; font-weight:700; color:var(--green); }
-  .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:24px; }
-  .stats p { color:var(--gray); font-size:.9rem; }
-  footer { background:var(--dark); color:#94a3b8; padding:40px 20px; text-align:center; font-size:.9rem; }
-  footer a { color:#fff; }
-  @media (max-width:700px) { .cols,.stats { grid-template-columns:1fr; } }
+  html { scroll-behavior:smooth; }
+  body { font-family:system-ui,-apple-system,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); line-height:1.65; overflow-x:hidden; }
+  .grid-bg { position:fixed; inset:0; z-index:0; opacity:.5; pointer-events:none;
+    background-image:linear-gradient(rgba(34,197,94,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(34,197,94,.07) 1px,transparent 1px);
+    background-size:44px 44px;
+    animation:drift 24s linear infinite; }
+  @keyframes drift { from{background-position:0 0,0 0;} to{background-position:44px 44px,44px 44px;} }
+  .glow { position:fixed; z-index:0; border-radius:50%; filter:blur(110px); opacity:.35; pointer-events:none; }
+  .glow.a { width:420px; height:420px; background:#16a34a; top:-160px; left:-120px; }
+  .glow.b { width:380px; height:380px; background:#0e7490; bottom:-140px; right:-100px; }
+  main { position:relative; z-index:1; }
+  .wrap { max-width:1080px; margin:0 auto; padding:0 24px; }
+
+  nav { display:flex; justify-content:space-between; align-items:center; padding:20px 0; }
+  .logo { font-weight:800; font-size:1.15rem; letter-spacing:.5px; }
+  .logo span { color:var(--green); }
+  .tag { font-size:.78rem; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:4px 12px; }
+
+  header { padding:76px 0 90px; text-align:center; }
+  .badge { display:inline-block; font-size:.8rem; color:var(--green2); border:1px solid rgba(34,197,94,.4); background:rgba(34,197,94,.08); padding:6px 14px; border-radius:999px; margin-bottom:22px; }
+  h1 { font-size:clamp(1.8rem,5vw,3.1rem); font-weight:800; line-height:1.15; max-width:820px; margin:0 auto 18px; }
+  h1 em { font-style:normal; background:linear-gradient(90deg,var(--green2),var(--cyan)); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .sub { color:var(--muted); font-size:1.08rem; max-width:640px; margin:0 auto 30px; }
+  .btns { display:flex; gap:14px; justify-content:center; flex-wrap:wrap; }
+  .btn { display:inline-block; text-decoration:none; font-weight:600; padding:13px 26px; border-radius:10px; transition:transform .15s, box-shadow .15s; }
+  .btn:hover { transform:translateY(-2px); }
+  .btn.primary { background:linear-gradient(90deg,#16a34a,#059669); color:#fff; box-shadow:0 8px 30px rgba(34,197,94,.25); }
+  .btn.ghost { color:var(--text); border:1px solid var(--line); background:rgba(15,22,41,.6); }
+
+  section { padding:64px 0; }
+  h2 { font-size:1.7rem; margin-bottom:8px; }
+  .kicker { color:var(--green); font-size:.82rem; font-weight:700; text-transform:uppercase; letter-spacing:2px; margin-bottom:10px; }
+  .lead { color:var(--muted); max-width:640px; margin-bottom:34px; }
+
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:20px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:26px; transition:border-color .2s, transform .2s; position:relative; overflow:hidden; }
+  .card:hover { border-color:rgba(34,197,94,.5); transform:translateY(-3px); }
+  .card .num { position:absolute; top:14px; right:18px; font-size:2rem; font-weight:800; color:rgba(34,197,94,.14); }
+  .card h3 { margin:10px 0 8px; font-size:1.05rem; }
+  .card p, .card ul { color:var(--muted); font-size:.95rem; }
+  .card ul { padding-left:18px; }
+  .chip { display:inline-block; font-size:.72rem; border:1px solid var(--line); border-radius:6px; padding:3px 9px; color:var(--cyan); margin:0 6px 8px 0; background:rgba(34,211,238,.05); }
+
+  .split { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+  @media (max-width:760px) { .split { grid-template-columns:1fr; } }
+
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:18px; }
+  .stat { text-align:center; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:28px 16px; }
+  .stat b { display:block; font-size:2.1rem; background:linear-gradient(90deg,var(--green2),var(--cyan)); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .stat span { color:var(--muted); font-size:.88rem; }
+
+  .term { background:#070b16; border:1px solid var(--line); border-radius:14px; overflow:hidden; font-family:ui-monospace,Consolas,monospace; font-size:.85rem; }
+  .term .bar { display:flex; gap:8px; padding:12px 14px; border-bottom:1px solid var(--line); }
+  .term .dot { width:11px; height:11px; border-radius:50%; }
+  .term pre { padding:20px 22px; margin:0; color:#a7f3d0; white-space:pre-wrap; }
+  .term .c { color:var(--muted); }
+  .term .g { color:var(--green2); }
+  .term .y { color:#fde047; }
+
+  footer { border-top:1px solid var(--line); margin-top:40px; padding:44px 0 56px; color:var(--muted); font-size:.9rem; }
+  footer a { color:var(--green2); text-decoration:none; }
+  .foot-grid { display:flex; justify-content:space-between; flex-wrap:wrap; gap:18px; }
 </style>
 </head>
 <body>
 
-<header>
-  <h1>La puissance de calcul GPU des particuliers, au service des entreprises</h1>
-  <p class="sub">ComputeShare met en relation les entreprises qui ont des jobs de calcul avec des machines particulieres oisives. Jusqu'a 60&nbsp;% d'economie face aux clouds traditionnels.</p>
-  <a class="btn" href="https://github.com/pierreh59/computeshare">Voir la plateforme</a>
-</header>
+<div class="grid-bg"></div>
+<div class="glow a"></div>
+<div class="glow b"></div>
 
-<section>
-  <h2>Comment ca marche</h2>
-  <div class="cols">
-    <div class="card">
-      <h3>Cote entreprise (demandeur)</h3>
-      <ul>
-        <li>Creez votre organisation et son solde de credits prepayes</li>
-        <li>Soumettez vos jobs depuis la console web (ou l'API B2B)</li>
-        <li>Le travail est decoupe en taches et distribue aux noeuds</li>
-        <li>Vous etes facture a la duree reelle, GPU-heure par GPU-heure</li>
-      </ul>
-    </div>
-    <div class="card">
-      <h3>Cote particulier (fournisseur de puissance)</h3>
-      <ul>
-        <li>Installez l'application desktop ComputeShare</li>
-        <li>Votre machine travaille quand vous ne l'utilisez pas</li>
-        <li>Chaque tache executee credite votre wallet vendeur</li>
-        <li>Retirez vos gains quand vous voulez (KYC requis)</li>
-      </ul>
-    </div>
-  </div>
-</section>
+<main>
+<div class="wrap">
 
-<section>
-  <h2>Pourquoi ComputeShare</h2>
-  <div class="stats">
-    <div><div class="stat">-60&nbsp;%</div><p>d'economie moyenne face a un cloud GPU classique</p></div>
-    <div><div class="stat">seconde</div><p>facturation a la duree reelle, pas au forfait horaire</p></div>
-    <div><div class="stat">sandbox</div><p>execution isolee : vos donnees ne quittent pas la plateforme</p></div>
-  </div>
-</section>
+  <nav>
+    <div class="logo">Compute<span>Share</span></div>
+    <div class="tag">beta privee - places limitees</div>
+  </nav>
 
-<section>
-  <h2>Se lancer</h2>
-  <div class="cols">
-    <div class="card">
-      <h3>Entreprise</h3>
-      <p style="color:var(--gray)">Demandez votre acces pilote et votre cle API, puis suivez le <a href="https://github.com/pierreh59/computeshare/blob/main/docs/GUIDE-CLIENT-B2B.md">guide client</a>.</p>
+  <header>
+    <div class="badge">Marketplace de calcul GPU distribue</div>
+    <h1>La puissance de calcul <em>GPU des particuliers</em>, au service des entreprises</h1>
+    <p class="sub">Vos jobs de calcul sont decoupes, distribues et executes sur des machines particulieres oisives - factures a la seconde reelle d'execution.</p>
+    <div class="btns">
+      <a class="btn primary" href="https://github.com/pierreh59/computeshare/blob/main/docs/GUIDE-CLIENT-B2B.md">Je suis une entreprise</a>
+      <a class="btn ghost" href="https://github.com/pierreh59/computeshare/blob/main/docs/GUIDE-NOEUD-VENDEUR.md">Je loue ma machine</a>
     </div>
-    <div class="card">
-      <h3>Particulier</h3>
-      <p style="color:var(--gray)">Installez l'application et gagnez de l'argent pendant que votre PC dort : <a href="https://github.com/pierreh59/computeshare/blob/main/docs/GUIDE-NOEUD-VENDEUR.md">guide fournisseur</a>.</p>
-    </div>
-  </div>
-</section>
+  </header>
 
-<footer>
-  <p>ComputeShare - marketplace de calcul distribue</p>
-  <p><a href="https://github.com/pierreh59/computeshare">Documentation</a> - Console B2B : api.computeshare.fr/console</p>
-</footer>
+  <section>
+    <p class="kicker">Comment ca marche</p>
+    <h2>Du job au resultat, en trois etapes</h2>
+    <p class="lead">Aucune infrastructure a gerer : une console web, une API, et une flotte de noeuds qui se met au travail.</p>
+    <div class="cards">
+      <div class="card"><div class="num">01</div>
+        <span class="chip">console B2B</span><span class="chip">API</span>
+        <h3>Soumettez</h3>
+        <p>Vous depositez le job (commande, arguments, nombre de taches) depuis la console. Le cout HT/TTC est simule avant validation - equivalent AWS affiche pour comparer.</p>
+      </div>
+      <div class="card"><div class="num">02</div>
+        <span class="chip">chunker</span><span class="chip">scheduling</span><span class="chip">anti-fraude</span>
+        <h3>Distribution automatique</h3>
+        <p>La plateforme decoupe le travail en taches, choisit les noeuds disponibles, verifie leur bonne foi et replanifie toute tache en echec.</p>
+      </div>
+      <div class="card"><div class="num">03</div>
+        <span class="chip">sandbox</span><span class="chip">SHA-256</span>
+        <h3>Resultat verifie, facture au reel</h3>
+        <p>Chaque tache s'execute en sandbox isole, le resultat est verifie par empreinte. Vous payez la duree GPU reellement consommee, a la seconde.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="kicker">Preuves</p>
+    <h2>Les chiffres</h2>
+    <div class="stats">
+      <div class="stat"><b>-60 %</b><span>d'economie moyenne face a un cloud GPU classique</span></div>
+      <div class="stat"><b>a la seconde</b><span>facturation sur duree reelle, jamais au forfait</span></div>
+      <div class="stat"><b>0 echange</b><span>de donnees : tout s'execute dans le sandbox du noeud</span></div>
+    </div>
+  </section>
+
+  <section>
+    <p class="kicker">Cote technique</p>
+    <h2>Une API simple, une flotte pilotable</h2>
+    <div class="split">
+      <div class="term">
+        <div class="bar">
+          <span class="dot" style="background:#ef4444"></span>
+          <span class="dot" style="background:#fbbf24"></span>
+          <span class="dot" style="background:#22c55e"></span>
+        </div>
+        <pre><span class="c"># Soumettre un job depuis votre terminal</span>
+<span class="g">POST</span> /jobs
+Authorization: Bearer <span class="y">cshare_...</span>
+
+{ "job_id": "render-42",
+  "command": "ffmpeg.exe",
+  "args": "-i in.mp4 -c:v libx264 out.mp4",
+  "tasks": 8, "output_name": "out.mp4" }
+
+<span class="c"># Reponse : suivi en temps reel</span>
+<span class="g">GET</span> /jobs/render-42
+{ "status": "completed", "done": 8,
+  "cost_ht_eur": 0.0038, "gpu_hours": 0.0117 }</pre>
+      </div>
+      <div class="cards" style="grid-template-columns:1fr">
+        <div class="card">
+          <h3>La stack</h3>
+          <p><span class="chip">Go</span><span class="chip">Rust / Tauri</span><span class="chip">PostgreSQL</span><span class="chip">NATS</span><span class="chip">Docker</span><span class="chip">Caddy / HTTPS auto</span></p>
+          <p>Orchestrateur Go, application desktop Rust (Tauri), persistance PostgreSQL, file NATS, deploiement Docker unifilaire.</p>
+        </div>
+        <div class="card">
+          <h3>Securite par conception</h3>
+          <ul>
+            <li>Execution sandboxee : pas de reseau, pas d'acces disque hors workspace</li>
+            <li>Allowlist de commandes + timeout d'execution</li>
+            <li>Anti-fraude : empreinte machine, detection Sybil et de lenteur anormale</li>
+            <li>Journalisation complete de chaque centime (client, wallet vendeur, TVA)</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="kicker">Rejoindre la beta</p>
+    <h2>Deux facons d'entrer</h2>
+    <div class="split">
+      <div class="card">
+        <span class="chip">demandeur</span>
+        <h3>Entreprise : premier job en 10 minutes</h3>
+        <p>Organisation + credits prepayes, console de suivi live, facturation HT/TVA journalisee. Nous accompagnons les 10 clients pilotes personnellement.</p>
+        <a class="btn primary" style="margin-top:14px" href="https://github.com/pierreh59/computeshare/blob/main/docs/GUIDE-CLIENT-B2B.md">Guide client B2B</a>
+      </div>
+      <div class="card">
+        <span class="chip">fournisseur</span>
+        <h3>Particulier : votre PC gagne pendant que vous dormez</h3>
+        <p>Installation en deux minutes, la machine ne travaille que quand vous ne l'utilisez pas, wallet credite en temps reel, retraits apres KYC.</p>
+        <a class="btn ghost" style="margin-top:14px" href="https://github.com/pierreh59/computeshare/blob/main/docs/GUIDE-NOEUD-VENDEUR.md">Guide fournisseur</a>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="foot-grid">
+      <div class="logo">Compute<span>Share</span></div>
+      <div><a href="https://github.com/pierreh59/computeshare">Documentation</a> - Console B2B : api.computeshare.fr/console</div>
+    </div>
+    <p style="margin-top:18px">Marketplace de calcul distribue - phase beta privee.</p>
+  </footer>
+
+</div>
+</main>
 
 </body>
 </html>
