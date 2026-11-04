@@ -12,8 +12,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with: { go-version: "1.23" }
-      - run: cd services/orchestrator && go vet ./... && go build ./...
+      - run: cd services/orchestrator && go vet ./... && go test ./... && go build ./...
 
+  # Toutes les migrations, dans l'ordre, sur une base vierge : une virgule
+  # orpheline dans une migration casse l'init du volume Postgres en prod
+  # (vu en vrai le 4 nov. 2026 avec 006_wallet.sql).
   migrations:
     runs-on: ubuntu-latest
     services:
@@ -29,4 +32,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client
-      - run: PGPASSWORD=ci psql -h localhost -U ci -d ci -v ON_ERROR_STOP=1 -f db/migrations/001_schema.sql
+      - name: Appliquer toutes les migrations dans l'ordre
+        run: |
+          set -e
+          for f in db/migrations/*.sql; do
+            echo "== $f"
+            PGPASSWORD=ci psql -h localhost -U ci -d ci -v ON_ERROR_STOP=1 -f "$f"
+          done
+
+  # L'app desktop Tauri doit compiler depuis le depot : le code Rust des
+  # sprints 1-7 n'avait jamais ete compile hors de la machine de dev, et
+  # six erreurs se cachaient dans la version poussee (vu en vrai le 4 nov.).
+  desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with: { workspaces: "apps/desktop/src-tauri" }
+      - name: cargo check
+        run: cargo check
+        working-directory: apps/desktop/src-tauri
