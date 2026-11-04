@@ -13,10 +13,14 @@ fn node_token() -> String {
     std::env::var("COMPUTERSHARE_NODE_TOKEN").unwrap_or_else(|_| "dev-node-token".to_string())
 }
 
-/// Construit l'URL complete depuis la gateway et le chemin.
+/// Construit l'URL complete depuis la gateway et le chemin, en evitant
+/// le double slash "https://gw//path" qui declenchait une redirection
+/// 301 (et la perte du corps POST) cote serveur.
 /// "https://api.computeshare.fr" + "/register" -> "https://api.computeshare.fr/register"
 fn full_url(url: &str, path: &str) -> String {
-    format!("{}/{}", url.trim().trim_end_matches('/'), path)
+    let base = url.trim().trim_end_matches('/');
+    let p = path.trim_start_matches('/');
+    format!("{}/{}", base, p)
 }
 
 fn agent() -> ureq::Agent {
