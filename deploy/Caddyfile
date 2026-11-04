@@ -1,5 +1,13 @@
-# Caddy : HTTPS automatique (Let's Encrypt) pour le domaine defini
-# dans .env, reverse proxy vers l'orchestrateur.
+# Caddy : HTTPS automatique (Let's Encrypt).
+#
+# - {$SITE_DOMAIN} : le site vitrine (web/index.html)
+# - {$DOMAIN}      : l'API orchestrateur (api.<domaine>)
+
+{$SITE_DOMAIN} {
+	root * /srv/web
+	file_server
+	encode gzip
+}
 
 {$DOMAIN} {
 	encode gzip

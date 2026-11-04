@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ComputeShare - La puissance de calcul GPU des particuliers, au service des entreprises</title>
+<meta name="description" content="Marketplace de calcul distribue : les entreprises soumettent leurs jobs GPU a prix reduit, les particuliers louent la puissance oisive de leur machine.">
+<style>
+  :root { --green:#16a34a; --dark:#0f172a; --gray:#64748b; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:system-ui,-apple-system,sans-serif; color:var(--dark); line-height:1.6; }
+  header { background:linear-gradient(135deg,#064e3b,#16a34a); color:#fff; padding:90px 20px; text-align:center; }
+  h1 { font-size:2.4rem; max-width:800px; margin:0 auto 16px; }
+  .sub { font-size:1.15rem; opacity:.92; max-width:640px; margin:0 auto 28px; }
+  .btn { display:inline-block; background:#fff; color:var(--green); text-decoration:none; font-weight:600; padding:12px 28px; border-radius:8px; }
+  section { max-width:900px; margin:0 auto; padding:60px 20px; }
+  h2 { font-size:1.6rem; margin-bottom:24px; }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+  .card { border:1px solid #e2e8f0; border-radius:12px; padding:24px; }
+  .card h3 { margin-bottom:12px; }
+  .card ul { padding-left:20px; color:var(--gray); }
+  .stat { text-align:center; font-size:2rem; font-weight:700; color:var(--green); }
+  .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:24px; }
+  .stats p { color:var(--gray); font-size:.9rem; }
+  footer { background:var(--dark); color:#94a3b8; padding:40px 20px; text-align:center; font-size:.9rem; }
+  footer a { color:#fff; }
+  @media (max-width:700px) { .cols,.stats { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>La puissance de calcul GPU des particuliers, au service des entreprises</h1>
+  <p class="sub">ComputeShare met en relation les entreprises qui ont des jobs de calcul avec des machines particulieres oisives. Jusqu'a 60&nbsp;% d'economie face aux clouds traditionnels.</p>
+  <a class="btn" href="https://github.com/pierreh59/computeshare">Voir la plateforme</a>
+</header>
+
+<section>
+  <h2>Comment ca marche</h2>
+  <div class="cols">
+    <div class="card">
+      <h3>Cote entreprise (demandeur)</h3>
+      <ul>
+        <li>Creez votre organisation et son solde de credits prepayes</li>
+        <li>Soumettez vos jobs depuis la console web (ou l'API B2B)</li>
+        <li>Le travail est decoupe en taches et distribue aux noeuds</li>
+        <li>Vous etes facture a la duree reelle, GPU-heure par GPU-heure</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Cote particulier (fournisseur de puissance)</h3>
+      <ul>
+        <li>Installez l'application desktop ComputeShare</li>
+        <li>Votre machine travaille quand vous ne l'utilisez pas</li>
+        <li>Chaque tache executee credite votre wallet vendeur</li>
+        <li>Retirez vos gains quand vous voulez (KYC requis)</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Pourquoi ComputeShare</h2>
+  <div class="stats">
+    <div><div class="stat">-60&nbsp;%</div><p>d'economie moyenne face a un cloud GPU classique</p></div>
+    <div><div class="stat">seconde</div><p>facturation a la duree reelle, pas au forfait horaire</p></div>
+    <div><div class="stat">sandbox</div><p>execution isolee : vos donnees ne quittent pas la plateforme</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>Se lancer</h2>
+  <div class="cols">
+    <div class="card">
+      <h3>Entreprise</h3>
+      <p style="color:var(--gray)">Demandez votre acces pilote et votre cle API, puis suivez le <a href="https://github.com/pierreh59/computeshare/blob/main/docs/GUIDE-CLIENT-B2B.md">guide client</a>.</p>
+    </div>
+    <div class="card">
+      <h3>Particulier</h3>
+      <p style="color:var(--gray)">Installez l'application et gagnez de l'argent pendant que votre PC dort : <a href="https://github.com/pierreh59/computeshare/blob/main/docs/GUIDE-NOEUD-VENDEUR.md">guide fournisseur</a>.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <p>ComputeShare - marketplace de calcul distribue</p>
+  <p><a href="https://github.com/pierreh59/computeshare">Documentation</a> - Console B2B : api.computeshare.fr/console</p>
+</footer>
+
+</body>
+</html>
