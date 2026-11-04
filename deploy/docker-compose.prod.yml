@@ -1,0 +1,85 @@
+# Stack de production ComputeShare :
+#   caddy (TLS automatique Let's Encrypt) -> orchestrateur -> postgres + nats
+#   + service "migrate" qui applique db/migrations/ a chaque demarrage.
+#
+# Usage (depuis ce dossier, avec un fichier .env a cote) :
+#   docker compose -f docker-compose.prod.yml --env-file .env up -d --build
+
+services:
+  orchestrator:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    environment:
+      PORT: "8081"
+      DATABASE_URL: postgres://computeshare:${POSTGRES_PASSWORD}@db:5432/computeshare?sslmode=disable
+      ADMIN_KEY: ${ADMIN_KEY}
+      NODE_ENROLLMENT_TOKEN: ${NODE_ENROLLMENT_TOKEN}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: computeshare
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: computeshare
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U computeshare"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Applique toutes les migrations dans l'ordre, puis se termine.
+  # Meme regle que la CI : une migration qui casse bloque le demarrage.
+  migrate:
+    image: postgres:16-alpine
+    volumes:
+      - ../db/migrations:/migrations:ro
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "Application des migrations..."
+        for f in /migrations/*.sql; do
+          echo "== $$f"
+          psql -h db -U computeshare -d computeshare -v ON_ERROR_STOP=1 -f "$$f"
+        done
+        echo "Migrations OK."
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  nats:
+    image: nats:2.10-alpine
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on:
+      - orchestrator
+    restart: unless-stopped
+
+volumes:
+  pgdata: {}
+  caddydata: {}
+  caddyconfig: {}

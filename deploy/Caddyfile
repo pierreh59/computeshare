@@ -1,0 +1,7 @@
+# Caddy : HTTPS automatique (Let's Encrypt) pour le domaine defini
+# dans .env, reverse proxy vers l'orchestrateur.
+
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy orchestrator:8081
+}
