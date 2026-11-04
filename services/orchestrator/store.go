@@ -61,6 +61,14 @@ func nullStr(s string) interface{} {
 	return s
 }
 
+// nullTime : time.Time nulle -> NULL SQL (Sprint 15c).
+func nullTime(t time.Time) interface{} {
+	if t.IsZero() {
+		return nil
+	}
+	return t
+}
+
 // SaveNode insere ou rafraichit un noeud (idempotent).
 func (s *Store) SaveNode(n *Node) {
 	if !s.enabled() {
@@ -494,23 +502,28 @@ func (s *Store) LoadAll(reg *Registry, pricing *Pricing, chunker *Chunker, orgs 
 // ---- Sprint 15 : comptes utilisateurs (LAI-57) ----
 
 // SaveUser enregistre un compte (idempotent). tokenHash : SHA-256 du
-// jeton de noeud personnel (vide pour les clients).
+// jeton de noeud personnel (vide pour les clients). Sprint 15c : la
+// preuve de consentement RGPD et l'epoque de revocation de sessions
+// sont persistees des la creation.
 func (s *Store) SaveUser(u *User, pwHash, tokenHash string) {
 	if !s.enabled() {
 		return
 	}
 	_, err := s.db.Exec(`INSERT INTO runtime_users
 		(id, email, password_hash, role, display_name, org_id,
-		 seller_token_hash, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		 seller_token_hash, created_at, consent_at, sessions_before)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 		ON CONFLICT (id) DO UPDATE SET
 		  email=EXCLUDED.email,
 		  password_hash=EXCLUDED.password_hash,
 		  display_name=EXCLUDED.display_name,
 		  org_id=EXCLUDED.org_id,
-		  seller_token_hash=EXCLUDED.seller_token_hash`,
+		  seller_token_hash=EXCLUDED.seller_token_hash,
+		  consent_at=EXCLUDED.consent_at,
+		  sessions_before=EXCLUDED.sessions_before`,
 		u.ID, u.Email, pwHash, u.Role, u.DisplayName, u.OrgID,
-		tokenHash, u.CreatedAt)
+		tokenHash, u.CreatedAt,
+		nullTime(u.ConsentAt), nullTime(u.SessionsBefore))
 	if err != nil {
 		log.Printf("store.SaveUser: %v", err)
 	}
@@ -529,14 +542,63 @@ func (s *Store) SaveSellerToken(userID, tokenHash string) {
 	}
 }
 
-// LoadUsers recharge les comptes au demarrage.
+// SaveUserProfile met a jour le nom affiche (Sprint 15c).
+func (s *Store) SaveUserProfile(id, name string) {
+	if !s.enabled() {
+		return
+	}
+	_, err := s.db.Exec(
+		`UPDATE runtime_users SET display_name=$2 WHERE id=$1`, id, name)
+	if err != nil {
+		log.Printf("store.SaveUserProfile: %v", err)
+	}
+}
+
+// SaveUserPassword enregistre le nouveau hash de mot de passe et
+// l'epoque de revocation : toutes les sessions emises avant sont
+// invalidatees (Sprint 15c).
+func (s *Store) SaveUserPassword(id, pwHash string, sessionsBefore time.Time) {
+	if !s.enabled() {
+		return
+	}
+	_, err := s.db.Exec(
+		`UPDATE runtime_users SET password_hash=$2, sessions_before=$3 WHERE id=$1`,
+		id, pwHash, nullTime(sessionsBefore))
+	if err != nil {
+		log.Printf("store.SaveUserPassword: %v", err)
+	}
+}
+
+// SaveUserDeleted anonymise un compte supprime (droit a l'effacement
+// RGPD, Sprint 15c). Le mot de passe et le jeton sont efaces ;
+// deleted_at marque la suppression.
+func (s *Store) SaveUserDeleted(u *User) {
+	if !s.enabled() {
+		return
+	}
+	_, err := s.db.Exec(`UPDATE runtime_users SET
+		email=$2, display_name=$3, password_hash='', seller_token_hash='',
+		org_id='', deleted_at=$4 WHERE id=$1`,
+		u.ID, u.Email, u.DisplayName, nullTime(*u.DeletedAt))
+	if err != nil {
+		log.Printf("store.SaveUserDeleted: %v", err)
+	}
+}
+
+// LoadUsers recharge les comptes au demarrage. Sprint 15c : les
+// comptes supprimes ne sont pas restaures (ils restent anonymises en
+// base uniquement pour les ecritures comptables).
 func (s *Store) LoadUsers(a *AccountStore) {
 	if !s.enabled() {
 		return
 	}
 	rows, err := s.db.Query(`SELECT id, email, password_hash, role,
 		COALESCE(display_name, ''), COALESCE(org_id, ''),
-		COALESCE(seller_token_hash, '') FROM runtime_users`)
+		COALESCE(seller_token_hash, ''),
+		COALESCE(consent_at, created_at),
+		COALESCE(sessions_before, created_at),
+		deleted_at
+		FROM runtime_users WHERE deleted_at IS NULL AND password_hash <> ''`)
 	if err != nil {
 		log.Printf("store.LoadUsers: %v", err)
 		return
@@ -544,8 +606,12 @@ func (s *Store) LoadUsers(a *AccountStore) {
 	defer rows.Close()
 	for rows.Next() {
 		var id, email, pwHash, role, display, orgID, tokenHash string
-		if rows.Scan(&id, &email, &pwHash, &role, &display, &orgID, &tokenHash) == nil {
-			a.Restore(id, email, pwHash, role, display, orgID, tokenHash)
+		var consentAt, sessionsBefore time.Time
+		var deletedAt *time.Time
+		if rows.Scan(&id, &email, &pwHash, &role, &display, &orgID, &tokenHash,
+			&consentAt, &sessionsBefore, &deletedAt) == nil {
+			a.Restore(id, email, pwHash, role, display, orgID, tokenHash,
+				consentAt, sessionsBefore, deletedAt)
 		}
 	}
 }

@@ -47,6 +47,13 @@ func main() {
 	http.HandleFunc("/auth/login", accounts.handleLogin)
 	http.HandleFunc("/auth/me", accounts.handleMe)
 	http.HandleFunc("/auth/seller-token", accounts.handleSellerToken)
+	// Sprint 15c (LAI-60) : gestion de compte - profil, mot de passe,
+	// portabilite (export) et droit a l'effacement.
+	http.HandleFunc("/auth/profile", withSession(accounts, accounts.handleProfile))
+	http.HandleFunc("/auth/password", withSession(accounts, accounts.handlePassword))
+	http.HandleFunc("/auth/export", withSession(accounts, accounts.handleExport(registry, wallet, billing)))
+	http.HandleFunc("/auth/account", withSession(accounts, accounts.handleDeleteAccount(registry)))
+	http.HandleFunc("/privacy", privacyPage)
 
 	// Sprint 15 (LAI-58) : pages web des comptes.
 	http.HandleFunc("/signup", signupPage)

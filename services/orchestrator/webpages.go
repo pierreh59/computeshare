@@ -1,10 +1,11 @@
 package main
 
-// Sprint 15 (LAI-58) - Pages web des comptes, servies par l'orchestrateur :
-//   /signup          : inscription client ou vendeur
+// Sprint 15 (LAI-58) + 15c (LAI-60) - Pages web des comptes :
+//   /signup          : inscription entreprise ou fournisseur (+ consentement)
 //   /login           : connexion
-//   /me              : espace client (profil, credits, jobs)
-//   /seller          : espace vendeur (jeton, noeuds, gains)
+//   /me              : espace entreprise (profil, credits, jobs, compte)
+//   /seller          : espace fournisseur (jeton, noeuds, gains, compte)
+//   /privacy         : CGU beta + politique de confidentialite (RGPD)
 //   /admin/console   : mini-console admin (cle X-Admin-Key)
 // Style et mode d'emploi identiques a la console B2B existante :
 // pages autonomes, JS natif, appels directs a l'API.
@@ -62,19 +63,71 @@ function logout(){localStorage.removeItem('cs-session');localStorage.removeItem(
 function fmtEur(v){return (Math.round(v*1000000)/1000000).toFixed(6)+' EUR';}
 function esc(s){var d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;}
 </script>
+
+// Sprint 15c : carte de gestion de compte (RGPD).
+function renderAccountCard(){
+ var u=user();
+ document.getElementById('acct').innerHTML=
+  '<label>Nom ou entreprise affiché</label>'+
+  '<input id="acc-name" value="'+esc(u.display_name||'')+'">'+
+  '<button class="blue" onclick="saveName()">Enregistrer le nom</button>'+
+  '<h2 style="margin-top:28px">Changer mon mot de passe</h2>'+
+  '<label>Mot de passe actuel</label><input id="acc-pw0" type="password">'+
+  '<label>Nouveau mot de passe (8 caractères min.)</label><input id="acc-pw1" type="password">'+
+  '<button class="blue" onclick="savePass()">Changer le mot de passe</button>'+
+  '<h2 style="margin-top:28px">Mes données (RGPD)</h2>'+
+  '<button class="gray" onclick="doExport()">⬇️ Exporter mes données (JSON)</button>'+
+  '<p class="muted">La suppression du compte est définitive : nom, e-mail et mot de passe sont effacés'+(u.role==='seller'?', vos machines sont détachées':'')+'. Cette action ne peut pas être annulée.</p>'+
+  '<button style="background:#ef4444;color:#fff" onclick="deleteAccount()">🗑️ Supprimer mon compte</button>'+
+  '<div id="acct-msg" style="margin-top:10px"></div>';
+}
+function acctMsg(t,cls){document.getElementById('acct-msg').innerHTML='<p class="'+(cls||'')+'">'+t+'</p>';}
+function saveName(){
+ var v=document.getElementById('acc-name').value.trim();
+ if(!v){acctMsg('Le nom ne peut pas être vide.','err');return;}
+ api('/auth/profile',{method:'POST',body:JSON.stringify({name:v})}).then(function(u){
+  localStorage.setItem('cs-user',JSON.stringify(u));
+  acctMsg('✅ Nom enregistré.','ok');
+ }).catch(function(e){acctMsg('Erreur : '+esc(e.message),'err');});
+}
+function savePass(){
+ var p0=document.getElementById('acc-pw0').value,p1=document.getElementById('acc-pw1').value;
+ if(p1.length<8){acctMsg('Le nouveau mot de passe doit faire 8 caractères minimum.','err');return;}
+ api('/auth/password',{method:'POST',body:JSON.stringify({current_password:p0,new_password:p1})}).then(function(r){
+  localStorage.setItem('cs-session',r.session_token);
+  acctMsg('✅ Mot de passe changé. Vos autres appareils ont été déconnectés.','ok');
+  document.getElementById('acc-pw0').value='';document.getElementById('acc-pw1').value='';
+ }).catch(function(e){acctMsg('Erreur : '+esc(e.message),'err');});
+}
+function doExport(){
+ api('/auth/export').then(function(j){
+  var b=new Blob([JSON.stringify(j,null,2)],{type:'application/json'});
+  var a=document.createElement('a');a.href=URL.createObjectURL(b);
+  a.download='computeshare-export.json';a.click();URL.revokeObjectURL(a.href);
+ }).catch(function(e){acctMsg('Erreur : '+esc(e.message),'err');});
+}
+function deleteAccount(){
+ var p=window.prompt('Suppression définitive du compte.\nEntrez votre mot de passe pour confirmer :');
+ if(!p){return;}
+ if(!window.confirm('Dernière confirmation : supprimer définitivement ce compte et toutes ses données personnelles ?')){return;}
+ api('/auth/account',{method:'DELETE',body:JSON.stringify({password:p})}).then(function(){
+  logout();
+ }).catch(function(e){acctMsg('Erreur : '+esc(e.message),'err');});
+}
+</script>
 `
 
 const signupHTML = `<!DOCTYPE html>
 <html lang="fr">
-<head><meta charset="utf-8"><title>ComputeShare - Inscription</title>` + accountsCSS + accountsJS + `</head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ComputeShare - Inscription</title>` + accountsCSS + accountsJS + `</head>
 <body>
 <h1>🥗 ComputeShare — Créer un compte</h1>
 <p class="muted">Déjà inscrit ? <a href="/login">Se connecter</a></p>
 
 <div class="card">
  <h2>1. Je suis...</h2>
- <span class="rolebtn sel" id="role-client" onclick="setRole('client')">🏢 J'ai besoin de puissance (client)</span>
- <span class="rolebtn" id="role-seller" onclick="setRole('seller')">🖥️ Je propose ma machine (vendeur)</span>
+ <span class="rolebtn sel" id="role-client" onclick="setRole('client')">🏢 J'ai besoin de puissance (entreprise)</span>
+ <span class="rolebtn" id="role-seller" onclick="setRole('seller')">🖥️ Je propose ma machine (fournisseur)</span>
 </div>
 
 <div class="card">
@@ -82,6 +135,7 @@ const signupHTML = `<!DOCTYPE html>
  <label>Nom ou entreprise (optionnel)</label><input id="name" placeholder="Jean Dupont / ACME Corp">
  <label>Adresse e-mail</label><input id="email" type="email" placeholder="vous@exemple.fr">
  <label>Mot de passe (8 caractères minimum)</label><input id="password" type="password">
+ <label style="margin-top:14px;font-size:14px;color:#e2e8f0"><input type="checkbox" id="consent" style="width:auto;margin-right:6px">J'accepte les <a href="/privacy" target="_blank">CGU et la politique de confidentialité</a> (obligatoire)</label>
  <button onclick="doSignup()">Créer mon compte</button>
  <div id="msg"></div>
 </div>
@@ -94,23 +148,27 @@ function setRole(r){
  document.getElementById('role-seller').className='rolebtn'+(r==='seller'?' sel':'');
 }
 function doSignup(){
+ if(!document.getElementById('consent').checked){
+  document.getElementById('msg').innerHTML='<p class="err">Vous devez accepter les CGU et la politique de confidentialité pour créer un compte.</p>';
+  return;
+ }
  var body={email:document.getElementById('email').value.trim(),
   password:document.getElementById('password').value,
-  name:document.getElementById('name').value.trim(),role:role};
+  name:document.getElementById('name').value.trim(),role:role,consent:true};
  fetch('/auth/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
  .then(function(r){return r.text().then(function(t){var j;try{j=JSON.parse(t);}catch(e){j=null;}
    if(!r.ok){throw new Error((j&&j.error)||t||('HTTP '+r.status));}return j;});})
  .then(function(resp){
   saveAuth(resp);
   if(role==='seller'){
-   document.getElementById('msg').innerHTML='<div class="card"><h2>✅ Compte vendeur créé !</h2>'+
+   document.getElementById('msg').innerHTML='<div class="card"><h2>✅ Compte fournisseur créé !</h2>'+
     '<p>Votre <b>jeton de nœud personnel</b> (à coller dans l\'application desktop) :</p>'+
     '<p><code>'+resp.node_token+'</code></p>'+
-    '<button onclick="location.href=\'/seller\'">Continuer vers mon espace vendeur</button></div>';
+    '<button onclick="location.href=\'/seller\'">Continuer vers mon espace fournisseur</button></div>';
   }else{
-   document.getElementById('msg').innerHTML='<div class="card"><h2>✅ Compte client créé !</h2>'+
+   document.getElementById('msg').innerHTML='<div class="card"><h2>✅ Compte entreprise créé !</h2>'+
     '<p>Votre clé API B2B : <code>'+resp.api_key+'</code> (notez-la, elle ne sera plus affichée).</p>'+
-    '<button onclick="location.href=\'/me\'">Continuer vers mon espace client</button></div>';
+    '<button onclick="location.href=\'/me\'">Continuer vers mon espace entreprise</button></div>';
   }
  })
  .catch(function(e){document.getElementById('msg').innerHTML='<p class="err">Erreur : '+esc(e.message)+'</p>';});
@@ -121,7 +179,7 @@ function doSignup(){
 
 const loginHTML = `<!DOCTYPE html>
 <html lang="fr">
-<head><meta charset="utf-8"><title>ComputeShare - Connexion</title>` + accountsCSS + accountsJS + `</head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ComputeShare - Connexion</title>` + accountsCSS + accountsJS + `</head>
 <body>
 <h1>🥗 ComputeShare — Connexion</h1>
 <p class="muted">Pas encore de compte ? <a href="/signup">S'inscrire</a></p>
@@ -160,9 +218,9 @@ func loginPage(w http.ResponseWriter, r *http.Request) {
 
 const meHTML = `<!DOCTYPE html>
 <html lang="fr">
-<head><meta charset="utf-8"><title>ComputeShare - Mon espace client</title>` + accountsCSS + accountsJS + `</head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ComputeShare - Mon espace entreprise</title>` + accountsCSS + accountsJS + `</head>
 <body>
-<h1>🥗 Mon espace client</h1>
+<h1>🥗 Mon espace entreprise</h1>
 <p class="muted"><span id="who"></span> — <a href="#" onclick="logout();return false;">Se déconnecter</a></p>
 
 <div class="card">
@@ -193,9 +251,15 @@ const meHTML = `<!DOCTYPE html>
  <div id="usage"></div>
 </div>
 
+<div class="card">
+ <h2>Mon compte</h2>
+ <div id="acct"></div>
+</div>
+
 <script>
 if(!requireRole('client'))throw new Error('redirection');
 document.getElementById('who').textContent=user().email;
+renderAccountCard();
 refreshBalance();refreshUsage();
 function refreshBalance(){
  api('/v1/balance').then(function(b){
@@ -246,9 +310,9 @@ function tick(job){
 
 const sellerHTML = `<!DOCTYPE html>
 <html lang="fr">
-<head><meta charset="utf-8"><title>ComputeShare - Mon espace vendeur</title>` + accountsCSS + accountsJS + `</head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ComputeShare - Mon espace fournisseur</title>` + accountsCSS + accountsJS + `</head>
 <body>
-<h1>🥗 Mon espace vendeur</h1>
+<h1>🥗 Mon espace fournisseur</h1>
 <p class="muted"><span id="who"></span> — <a href="#" onclick="logout();return false;">Se déconnecter</a></p>
 
 <div class="card">
@@ -270,9 +334,15 @@ const sellerHTML = `<!DOCTYPE html>
  <div id="nodes"></div>
 </div>
 
+<div class="card">
+ <h2>Mon compte</h2>
+ <div id="acct"></div>
+</div>
+
 <script>
 if(!requireRole('seller'))throw new Error('redirection');
 document.getElementById('who').textContent=user().email;
+renderAccountCard();
 refreshNodes();refreshWallet();showToken();
 function refreshWallet(){
  api('/seller/wallet').then(function(w){
@@ -311,7 +381,7 @@ function rotate(){
 
 const adminHTML = `<!DOCTYPE html>
 <html lang="fr">
-<head><meta charset="utf-8"><title>ComputeShare - Console admin</title>` + accountsCSS + `</head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ComputeShare - Console admin</title>` + accountsCSS + `</head>
 <body>
 <h1>🥗 Console admin</h1>
 <p class="muted">Accès réservé. La clé admin est dans le fichier .env du serveur (ADMIN_KEY).</p>
@@ -373,4 +443,44 @@ func sellerPage(w http.ResponseWriter, r *http.Request) {
 func adminPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(adminHTML))
+}
+
+// GET /privacy : CGU beta + politique de confidentialite (Sprint 15c,
+// RGPD). Page statique, lipee depuis l'inscription.
+const privacyHTML = `<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ComputeShare - CGU et confidentialité</title>` + accountsCSS + `</head>
+<body>
+<h1>🥗 ComputeShare — CGU (bêta) et politique de confidentialité</h1>
+
+<div class="card">
+ <h2>Conditions générales d'utilisation (bêta)</h2>
+ <p class="muted">Version du 4 novembre 2026 — service en phase bêta de test.</p>
+ <p><b>1. Objet.</b> ComputeShare met en relation des entreprises qui ont besoin de puissance de calcul et des fournisseurs qui proposent la puissance de leurs machines (GPU).</p>
+ <p><b>2. Compte.</b> Vous êtes responsable de la confidentialité de vos identifiants et de vos jetons. Vous devez avoir 18 ans ou l'autorisation d'un représentant légal.</p>
+ <p><b>3. Service bêta.</b> Le service est fourni « en l'état », sans garantie de disponibilité. Des interruptions peuvent survenir pour maintenance ou évolution. Les données peuvent être réinitialisées pendant la phase de test.</p>
+ <p><b>4. Usages interdits.</b> Contenus illégaux, atteinte aux droits d'autrui, tentative de contourner la tarification ou les contrôles anti-fraude, exécution de charges nuisibles pour les machines des fournisseurs.</p>
+ <p><b>5. Tarifs et paiements.</b> Les entreprises achètent des crédits (euros HT) consommés à l'usage. Les gains des fournisseurs sont crédités sur leur portefeuille interne ; les retraits passent par la console d'administration après vérification. Pendant la bêta, les modalités de retrait restent à la discrétion de l'éditeur.</p>
+ <p><b>6. Responsabilité.</b> L'éditeur ne saurait être tenu responsable des pertes de données, résultats de calcul ou incidents liés à la phase bêta. Sauvegardez vos données et vérifiez vos résultats.</p>
+ <p><b>7. Résiliation.</b> Vous pouvez supprimer votre compte à tout moment depuis votre espace (« Mon compte »). L'éditeur peut suspendre un compte en cas de violation des présentes CGU.</p>
+</div>
+
+<div class="card">
+ <h2>Politique de confidentialité (RGPD)</h2>
+ <p><b>Responsable de traitement :</b> ComputeShare (contact : support@computeshare.fr).</p>
+ <p><b>Données collectées</b> — comptes : adresse e-mail, nom affiché (facultatif), mot de passe (haché, jamais en clair), horodatage de votre consentement. Machines : identifiant, modèle de GPU, disponibilité, gains. Facturation : historique des crédits et consommations.</p>
+ <p><b>Finalités :</b> fournir le service (authentification, mise en relation, facturation), prévenir la fraude, respecter les obligations comptables.</p>
+ <p><b>Base légale :</b> votre consentement (inscription), l'exécution du contrat (fonctionnement du service), l'obligation légale (conservation des écritures comptables).</p>
+ <p><b>Durées :</b> comptes actifs : le temps du service. Écritures comptables : durée légale de conservation. Comptes supprimés : données personnelles effacées immédiatement, seules des écritures anonymisées sont conservées.</p>
+ <p><b>Vos droits :</b> accès, rectification, export (bouton « Exporter mes données »), effacement (« Supprimer mon compte »). Pour toute demande : support@computeshare.fr.</p>
+ <p><b>Sous-traitants / hébergement :</b> le service est hébergé dans l'Union européenne (France). Aucune donnée n'est vendue. Aucun cookie publicitaire : seule une session locale (votre navigateur) est utilisée pour garder la connexion.</p>
+ <p><b>Sécurité :</b> mots de passe hachés (bcrypt), sessions signées et révocables, jetons de nœud rotatifs, restriction des tentatives de connexion.</p>
+ <p><a href="/signup">← Retour à l'inscription</a></p>
+</div>
+</body>
+</html>`
+
+func privacyPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(privacyHTML))
 }

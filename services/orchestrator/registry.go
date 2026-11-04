@@ -214,3 +214,17 @@ func (r *Registry) NodesOfUser(userID string) []Node {
 	}
 	return out
 }
+
+// UnbindSeller detache un noeud de son compte fournisseur (Sprint 15c,
+// suppression de compte RGPD). Le noeud devient orphelin : il sera
+// retire par le ramasse-miettes s'il ne rappele plus.
+func (r *Registry) UnbindSeller(nodeID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n, ok := r.nodes[nodeID]
+	if !ok || n.UserID == "" {
+		return
+	}
+	n.UserID = ""
+	r.store.SaveNode(n)
+}
