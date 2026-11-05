@@ -421,13 +421,14 @@ const dashHTML = `<!DOCTYPE html>
 <style>
 :root{color-scheme:dark}
 *{box-sizing:border-box}
-body{font-family:system-ui,Segoe UI,sans-serif;background:#0f172a;color:#e2e8f0;margin:0;padding:16px}
+body{font-family:system-ui,Segoe UI,sans-serif;font-size:15px;background:#0f172a;color:#e2e8f0;margin:0;padding:16px}
 h1{font-size:22px;margin:0 0 4px}
 .muted{color:#94a3b8;font-size:13px}
 .card{background:#1e293b;border-radius:10px;padding:14px;margin-top:12px}
 .stats{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
 .stat{background:#1e293b;border-radius:10px;padding:10px 16px;min-width:130px}
-.stat b{display:block;font-size:22px;color:#4ade80}
+.stat b{display:block;font-size:26px;color:#4ade80}
+.stat .lbl{font-size:13px;color:#94a3b8}
 .stat.warn b{color:#f87171}
 .stat.blue b{color:#60a5fa}
 input,button{font:inherit;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;padding:6px 10px}
@@ -436,11 +437,13 @@ button.sec{background:#334155}
 button.danger{background:#b91c1c}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
 #mapid{height:340px;border-radius:10px;margin-top:10px;background:#1e293b}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px;margin-top:10px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px;margin-top:10px}
 .ncard{background:#273449;border-radius:10px;padding:12px}
 .ncard.off{opacity:.55}
 .ncard.banned{border:1px solid #b91c1c}
-.ncard h3{margin:0 0 6px;font-size:15px}
+.ncard h3{margin:0 0 8px;font-size:16px}
+.ncard .muted{font-size:14px;line-height:1.5}
+td,th{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:240px}
 .badge{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;background:#334155}
 .badge.on{background:#16a34a}
 .badge.off{background:#475569}
@@ -448,7 +451,8 @@ button.danger{background:#b91c1c}
 .badge.warn{background:#b45309}
 table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
 td,th{padding:4px 8px;text-align:left;border-bottom:1px solid #334155}
-.log{max-height:260px;overflow-y:auto;font-family:ui-monospace,monospace;font-size:12px;line-height:1.6}
+.log{max-height:300px;overflow-y:auto;font-family:ui-monospace,monospace;font-size:13px;line-height:1.7}
+.plus{color:#60a5fa}
 .log .t{color:#64748b;margin-right:6px}
 .log .type{display:inline-block;min-width:80px;font-weight:600}
 .type-node_register{color:#60a5fa}.type-login{color:#c084fc}.type-signup{color:#c084fc}
@@ -517,11 +521,11 @@ function fmt(t){return new Date(t).toLocaleTimeString('fr-FR');}
 
 function renderStats(s){
   var h='';
-  h+='<div class="stat"><b>'+s.online+'</b>en ligne / '+s.total+'</div>';
-  h+='<div class="stat blue"><b>'+(s.chunks_done)+'</b>taches reussies</div>';
-  h+='<div class="stat"><b>'+(s.payout_eur).toFixed(4)+'</b>EUR verses aux fournisseurs</div>';
-  h+='<div class="stat warn"><b>'+s.banned+'</b>noeuds bloques</div>';
-  h+='<div class="stat warn"><b>'+(s.chunks_failed)+'</b>taches echouees</div>';
+  h+='<div class="stat"><b>'+s.online+' <span style="font-size:15px;color:#94a3b8">/ '+s.total+'</span></b><span class="lbl">unites en ligne</span></div>';
+  h+='<div class="stat blue"><b>'+(s.chunks_done)+'</b><span class="lbl">taches reussies</span></div>';
+  h+='<div class="stat"><b>'+(s.payout_eur).toFixed(4)+' EUR</b><span class="lbl">verses aux fournisseurs</span></div>';
+  h+='<div class="stat warn"><b>'+s.banned+'</b><span class="lbl">unites bloquees</span></div>';
+  h+='<div class="stat warn"><b>'+(s.chunks_failed)+'</b><span class="lbl">taches echouees</span></div>';
   document.getElementById('stats').innerHTML=h;
 }
 
@@ -533,14 +537,15 @@ function renderMap(nodes){
     layer=L.layerGroup().addTo(map);
   }
   layer.clearLayers();
-  var first=true;
   nodes.forEach(function(n){
-    if(!n.online||!n.lat&&!n.lon)return;
+    if(!n.online||(!n.lat&&!n.lon))return;
     var m=L.circleMarker([n.lat,n.lon],{radius:9,color:'#16a34a',fillColor:'#16a34a',fillOpacity:.8});
     var pop='<b>'+esc(n.id)+'</b><br>'+esc(n.gpu_model)+'<br>'+esc(n.country||'')+(n.city?' - '+esc(n.city):'')+'<br>'+(n.work?n.work.length:0)+' travail(s) en cours';
     m.bindPopup(pop).addTo(layer);
-    if(first){map.setView([n.lat,n.lon],5);first=false;}
   });
+  // Recentre la carte sur les unites visibles (pas de vue "monde").
+  var b=layer.getBounds();
+  if(b.isValid()){map.fitBounds(b.pad(0.4),{maxZoom:7});}
 }
 
 function renderBoard(nodes){
@@ -554,9 +559,12 @@ function renderBoard(nodes){
     h+='<div class="'+cls+'"><h3>'+esc(n.id)+' '+badge+'</h3>';
     h+='<div class="muted">'+esc(n.owner_email||'sans compte fournisseur')+' &#8226; '+esc(n.gpu_model)+' ('+esc(n.gpu_category)+') &#8226; zone '+esc(n.zone)+'</div>';
     h+='<div class="muted">'+esc(n.country||'')+(n.city?' - '+esc(n.city):'')+' &#8226; vu: '+fmt(n.last_seen)+' &#8226; '+trust+'</div>';
-    if(n.work&&n.work.length){
+    var wl=n.work||[];
+    if(wl.length){
+      var maxw=Math.min(4,wl.length);
       h+='<table>';
-      n.work.forEach(function(w){h+='<tr><td>'+esc(w.job_id)+'</td><td>'+esc(w.chunk_id)+'</td><td>'+(w.status==='running'?'&#9654; en cours':'&#8987; en file')+'</td></tr>';});
+      for(var i=0;i<maxw;i++){var w=wl[i];h+='<tr><td title="'+esc(w.chunk_id)+'">'+esc(w.job_id)+'</td><td>'+(w.status==='running'?'&#9654; en cours':'&#8987; en file')+'</td></tr>';}
+      if(wl.length>maxw){h+='<tr><td colspan="2" class="plus">+ '+(wl.length-maxw)+' autres taches en file</td></tr>';}
       h+='</table>';
     }
     if(n.status==='banned'){
