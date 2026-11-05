@@ -22,7 +22,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IENvbXB1dGVTaGFyZSBkZXNrdG9wIHVwZGF0ZXIgcHVibGljIGtleQpSV1RXVmNrQ043MWd1VDgrcmdqM1k3bWZUVUlHeGZzamFWVHVWYUNwTUVjS0R1L1lYSzBHc25DTgo=",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJEQkFDMDA1NTg2QjAzQjYKUldXMkEydFlCY0M2dmNldDVFem1tVlpmcWxVZGx6ZFM0bE5HNGM4T3lTZlZqSmh4SUZSd3VUSFcK",
       "endpoints": [
         "https://github.com/pierreh59/computeshare/releases/latest/download/latest.json"
       ]
@@ -31,9 +31,13 @@
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "windows": {
-      "webviewInstallMode": { "type": "embedBootstrapper" },
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
       "nsis": {
         "installMode": "currentUser"
       }
