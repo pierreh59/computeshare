@@ -109,8 +109,16 @@
       }
     };
 
-    document.querySelector("#logout").onclick = async () => {
-      if (!confirm("Se déconnecter ? Votre machine cessera de proposer sa puissance (les gains restent attachés à votre compte).")) return;
+    document.querySelector("#logout").onclick = async (e) => {
+      // Confirmation en deux clics (pas de boite de dialogue native,
+      // qui s'affiche chez le client sous le titre "tauri.localhost").
+      const b = e.target;
+      if (b.dataset.armed !== "1") {
+        b.dataset.armed = "1";
+        b.textContent = "Confirmer la déconnexion";
+        setTimeout(() => { b.dataset.armed = ""; b.textContent = "Se déconnecter"; }, 4000);
+        return;
+      }
       await inv("logout");
       location.reload();
     };
@@ -120,14 +128,50 @@
       msg.textContent = "Vérification...";
       try {
         const u = await inv("plugin:updater|check");
-        if (u && (u.available === true || u.version)) {
-          if (!confirm("Nouvelle version disponible (" + (u.version || "?") + "). Installer maintenant ?")) {
-            msg.textContent = "Mise à jour reportée.";
-            return;
-          }
-          msg.textContent = "Téléchargement et installation...";
-          await inv("plugin:updater|download_and_install");
-          await inv("plugin:process|relaunch");
+        if (u && u.rid !== undefined) {
+          // Proposition inline : boutons dans la fenetre, pas de
+          // confirm() natif (titre "tauri.localhost indique").
+          msg.textContent = "";
+          const span = document.createElement("span");
+          span.textContent = "Nouvelle version " + (u.version || "?") + " disponible — ";
+          const btnOui = document.createElement("button");
+          btnOui.textContent = "Installer maintenant";
+          const btnNon = document.createElement("button");
+          btnNon.textContent = "Plus tard";
+          btnNon.style.marginLeft = "8px";
+          span.appendChild(btnOui);
+          span.appendChild(btnNon);
+          msg.appendChild(span);
+          const nettoyer = () => { msg.textContent = ""; };
+          btnNon.onclick = nettoyer;
+          btnOui.onclick = async () => {
+            nettoyer();
+            const Channel = window.__TAURI__.core.Channel;
+            if (!Channel) {
+              msg.innerHTML = '<span style="color:#f87171">Interface de mise à jour indisponible.</span>';
+              return;
+            }
+            msg.textContent = "Téléchargement de la mise à jour... 0 %";
+            try {
+              let recu = 0, total = 0;
+              const chan = new Channel();
+              chan.onmessage = (ev) => {
+                if (ev.event === "Started" && ev.data && ev.data.contentLength) {
+                  total = ev.data.contentLength;
+                } else if (ev.event === "Progress") {
+                  recu += ev.data.chunkLength;
+                  msg.textContent = "Téléchargement de la mise à jour... " +
+                    (total ? Math.round(recu / total * 100) + " %" : Math.round(recu / 1024) + " Ko");
+                } else if (ev.event === "Finished") {
+                  msg.textContent = "Installation... l'application va redémarrer.";
+                }
+              };
+              await inv("plugin:updater|download_and_install", { rid: u.rid, onEvent: chan });
+              await inv("plugin:process|relaunch");
+            } catch (err) {
+              msg.innerHTML = '<span style="color:#f87171">' + esc(String(err)) + "</span>";
+            }
+          };
         } else {
           msg.textContent = "Application à jour.";
         }
