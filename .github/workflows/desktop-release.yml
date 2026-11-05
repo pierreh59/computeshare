@@ -39,6 +39,43 @@ jobs:
             exit 1
           fi
 
+      # Tauri telecharge NSIS et nsis_tauri_utils SANS mecanisme de
+      # reessai ; le CDN GitHub renvoie parfois des 504 qui font echouer
+      # tout le build (vu en vrai le 5 nov. 2026, deux fois). On
+      # pre-telecharge avec curl --retry directement dans le cache que
+      # tauri-bundler utilise (%LOCALAPPDATA%\tauri\nsis) : s'il y
+      # trouve makensis.exe et la dll, il ne telecharge plus rien.
+      - name: Pre-telecharger NSIS (contourne les 504 du CDN)
+        shell: pwsh
+        run: |
+          $cache = Join-Path $env:LOCALAPPDATA "tauri\nsis"
+          New-Item -ItemType Directory -Force -Path $cache | Out-Null
+          function Get-File($url, $dest) {
+            if (Test-Path $dest) { return $true }
+            foreach ($i in 1..6) {
+              Write-Host "telechargement $url (essai $i)"
+              curl.exe -L --retry 5 --retry-delay 5 --connect-timeout 20 -o "$dest.tmp" $url
+              if ($LASTEXITCODE -eq 0 -and (Test-Path "$dest.tmp")) {
+                Move-Item -Force "$dest.tmp" $dest
+                return $true
+              }
+              Start-Sleep 10
+            }
+            return $false
+          }
+          $zip = Join-Path $cache "nsis-3.13.zip"
+          if (-not (Test-Path (Join-Path $cache "nsis-3.13\makensis.exe"))) {
+            if (Get-File "https://github.com/tauri-apps/binary-releases/releases/download/nsis-3.13/nsis-3.13.zip" $zip) {
+              Expand-Archive -Path $zip -DestinationPath $cache -Force
+            }
+          }
+          Get-File "https://github.com/tauri-apps/nsis-tauri-utils/releases/latest/download/nsis_tauri_utils.dll" (Join-Path $cache "nsis_tauri_utils.dll") | Out-Null
+          if (Test-Path (Join-Path $cache "nsis-3.13\makensis.exe")) {
+            Write-Host "NSIS pre-telecharge OK"
+          } else {
+            Write-Host "NSIS absent : tauri tentera son propre telechargement"
+          }
+
       - uses: tauri-apps/tauri-action@v0
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
