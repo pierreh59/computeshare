@@ -65,13 +65,16 @@ func nodeWS(reg *Registry, hub *Hub, w http.ResponseWriter, r *http.Request) {
 		case "register":
 			// LAI-44 : l'empreinte machine accompagne le register
 			// pour la detection anti-Sybil.
+			etaitEnLigne := reg.IsOnline(msg.NodeID)
 			n := reg.Register(msg.NodeID, msg.GPUModel, msg.GPUCategory,
 				msg.Zone, msg.MachineFingerprint)
 			reg.SetNodeIP(msg.NodeID, clientIP(r))
 			log.Printf("node registered: %s (%s/%s, zone %s, trust %.0f)",
 				n.ID, n.GPUModel, n.GPUCategory, n.Zone, n.TrustScore)
-			dashLog("node_register", fmt.Sprintf("noeud %s en ligne (%s, zone %s, confiance %.0f)",
-				n.ID, n.GPUModel, n.Zone, n.TrustScore))
+			if !etaitEnLigne {
+				dashLog("node_register", fmt.Sprintf("noeud %s en ligne (%s, zone %s, confiance %.0f)",
+					n.ID, n.GPUModel, n.Zone, n.TrustScore))
+			}
 		case "heartbeat":
 			if !reg.Heartbeat(msg.NodeID) {
 				log.Printf("heartbeat d'un noeud inconnu: %s", msg.NodeID)

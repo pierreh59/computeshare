@@ -88,10 +88,13 @@ func main() {
 			http.Error(w, "invalid register", http.StatusBadRequest)
 			return
 		}
+		etaitEnLigne := registry.IsOnline(msg.NodeID)
 		writeJSON(w, registry.Register(msg.NodeID, msg.GPUModel,
 			msg.GPUCategory, msg.Zone, msg.MachineFingerprint))
 		registry.SetNodeIP(msg.NodeID, clientIP(r))
-		dashLog("node_register", "noeud "+msg.NodeID+" en ligne ("+msg.GPUModel+", zone "+msg.Zone+")")
+		if !etaitEnLigne {
+			dashLog("node_register", "noeud "+msg.NodeID+" en ligne ("+msg.GPUModel+", zone "+msg.Zone+")")
+		}
 		// Sprint 15 : jeton personnel -> le noeud devient la
 		// propriete du compte vendeur.
 		if sellerID != "" {
