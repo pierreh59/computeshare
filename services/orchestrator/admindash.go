@@ -537,7 +537,7 @@ function renderMap(nodes){
   nodes.forEach(function(n){
     if(!n.online||!n.lat&&!n.lon)return;
     var m=L.circleMarker([n.lat,n.lon],{radius:9,color:'#16a34a',fillColor:'#16a34a',fillOpacity:.8});
-    var pop='<b>'+esc(n.id)+'</b><br>'+esc(n.gpu_model)+'<br>'+esc(n.country||'')+(n.city?' - '+esc(n.city):'')+'<br>'+n.work.length+' travail(s) en cours';
+    var pop='<b>'+esc(n.id)+'</b><br>'+esc(n.gpu_model)+'<br>'+esc(n.country||'')+(n.city?' - '+esc(n.city):'')+'<br>'+(n.work?n.work.length:0)+' travail(s) en cours';
     m.bindPopup(pop).addTo(layer);
     if(first){map.setView([n.lat,n.lon],5);first=false;}
   });
@@ -594,13 +594,14 @@ function renderLog(events){
   document.getElementById('log').innerHTML=h||'<div class="muted">Journal vide (redemarrage recent).</div>';
 }
 
+function safe(fn){try{return fn();}catch(e){console.error(e);}}
 function load(){
   api('/admin/dash/data').then(function(d){
-    renderStats(d.stats||{});
-    renderMap(d.nodes||[]);
-    renderBoard(d.nodes||[]);
-    renderJobs(d.jobs||[]);
-    renderLog(d.events||[]);
+    safe(function(){renderStats(d.stats||{});});
+    safe(function(){renderMap(d.nodes||[]);});
+    safe(function(){renderBoard(d.nodes||[]);});
+    safe(function(){renderJobs(d.jobs||[]);});
+    safe(function(){renderLog(d.events||[]);});
     document.getElementById('lastup').textContent='Derniere mise a jour: '+new Date().toLocaleTimeString('fr-FR');
   }).catch(function(e){
     document.getElementById('lastup').innerHTML='<span style="color:#f87171">'+esc(String(e))+'</span>';
