@@ -22,7 +22,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "RWTWVckCN71guT8+rgj3Y7mfTUIGxfsjaVTuVaCpMEcKDu/YXK0GsnCN",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IENvbXB1dGVTaGFyZSBkZXNrdG9wIHVwZGF0ZXIgcHVibGljIGtleQpSV1RXVmNrQ043MWd1VDgrcmdqM1k3bWZUVUlHeGZzamFWVHVWYUNwTUVjS0R1L1lYSzBHc25DTgo=",
       "endpoints": [
         "https://github.com/pierreh59/computeshare/releases/latest/download/latest.json"
       ]
