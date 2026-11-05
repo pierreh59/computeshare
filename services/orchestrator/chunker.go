@@ -166,6 +166,14 @@ func (c *Chunker) Complete(chunkID, outcome, sha string, durationSecs uint64) bo
 			} else {
 				ch.Status = "failed"
 			}
+			// Sprint 17 : journal temps reel du dashboard admin.
+			if outcome == "ok" {
+				dashLog("chunk_done", fmt.Sprintf("%s termine par %s (%.0f s, verse %.6f EUR)",
+					ch.ID, ch.NodeID, float64(durationSecs), ch.PayoutEur))
+			} else {
+				dashLog("chunk_failed", fmt.Sprintf("%s ECHEC sur %s : %s",
+					ch.ID, ch.NodeID, outcome))
+			}
 			// LAI-43/44 : sampling et detection d'execution ralentie
 			// (logique detaillee dans fraud.go).
 			c.fraudCheck(ch, outcome)

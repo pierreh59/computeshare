@@ -5,6 +5,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 )
@@ -37,6 +38,8 @@ func v1Submit(orgs *OrgStore, c *Chunker, b *Billing) http.HandlerFunc {
 			http.Error(w, "no node available", http.StatusServiceUnavailable)
 			return
 		}
+		dashLog("job_submit", fmt.Sprintf("job %s soumis par %s (%d taches, %s)",
+			job.ID, org.Name, len(chunks), job.Command))
 		writeJSON(w, map[string]interface{}{
 			"job_id":     job.ID,
 			"task_count": len(chunks),

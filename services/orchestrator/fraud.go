@@ -46,6 +46,8 @@ func (f *Fraud) alert(alertType, nodeID, msg string) {
 		Type: alertType, NodeID: nodeID, Msg: msg, At: time.Now(),
 	})
 	f.mu.Unlock()
+	// Sprint 17 : visible en direct dans le dashboard admin.
+	dashLog("fraud", "["+alertType+"] "+msg)
 }
 
 // Alerts copie des alertes, plus recentes en premier.

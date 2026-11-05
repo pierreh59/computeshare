@@ -551,6 +551,9 @@ func (a *AccountStore) handleSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u, secret, session, code := a.SignUp(req.Email, req.Password, req.Role, req.Name, req.Consent, req.Company)
+	if u != nil {
+		dashLog("signup", u.Email+" a cree un compte "+u.Role)
+	}
 	if code == http.StatusConflict {
 		writeErr(w, code, "email deja utilise")
 		return
@@ -596,6 +599,7 @@ func (a *AccountStore) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, code, "identifiants invalides")
 		return
 	}
+	dashLog("login", u.Email+" s'est connecte ("+u.Role+")")
 	writeJSON(w, map[string]interface{}{"user": u, "session_token": session})
 }
 

@@ -68,6 +68,12 @@ func main() {
 
 	// Mini-console admin (cle X-Admin-Key, LAI-59).
 	http.HandleFunc("/admin/console", adminPage)
+	// Sprint 17 : dashboard admin temps reel (LAI-63).
+	http.HandleFunc("/admin/dashboard", dashboardPage)
+	http.HandleFunc("/admin/dash/data", adminDashData(registry, chunker, fraud, accounts, orgs))
+	http.HandleFunc("/admin/dash/ban", adminDashBan(registry, chunker))
+	http.HandleFunc("/admin/dash/unban", adminDashUnban(registry))
+	http.HandleFunc("/admin/dash/cancel", adminDashCancel(chunker))
 	// Sprint 14 : les endpoints noeuds sont proteges par le jeton
 	// d'enrolement (en-tete X-Node-Token, cf. nodeauth.go).
 	http.HandleFunc("/register", nodeAuth.withNodeToken(func(w http.ResponseWriter, r *http.Request, sellerID string) {
@@ -84,6 +90,8 @@ func main() {
 		}
 		writeJSON(w, registry.Register(msg.NodeID, msg.GPUModel,
 			msg.GPUCategory, msg.Zone, msg.MachineFingerprint))
+		registry.SetNodeIP(msg.NodeID, clientIP(r))
+		dashLog("node_register", "noeud "+msg.NodeID+" en ligne ("+msg.GPUModel+", zone "+msg.Zone+")")
 		// Sprint 15 : jeton personnel -> le noeud devient la
 		// propriete du compte vendeur.
 		if sellerID != "" {
@@ -348,6 +356,7 @@ func main() {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		dashLog("admin", fmt.Sprintf("rechargement de %.2f EUR pour %s par l'admin", req.AmountEur, req.OrgID))
 		writeJSON(w, e)
 	})
 	http.HandleFunc("/admin/billing/refund", adminBillingRefund(billing))

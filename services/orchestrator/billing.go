@@ -310,6 +310,8 @@ func adminBillingRefund(b *Billing) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		dashLog("admin", fmt.Sprintf("remboursement de %.2f EUR pour %s par l'admin (ref: %s)",
+			req.AmountEur, req.OrgID, req.Ref))
 		writeJSON(w, e)
 	}
 }

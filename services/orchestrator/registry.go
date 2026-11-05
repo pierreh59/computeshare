@@ -19,6 +19,9 @@ type Node struct {
 	MachineFingerprint string    `json:"machine_fingerprint,omitempty"`
 	LastSeen    time.Time `json:"last_seen"`
 	Online      bool      `json:"online"`
+	// Sprint 17 : IP d'origine (X-Forwarded-For) pour la geolocalisation
+	// du dashboard admin. En memoire uniquement (jamais persistee).
+	IP string `json:"-"`
 }
 
 // Registry : map protegee par mutex, avec purge des noeuds silencieux.
@@ -56,7 +59,11 @@ func (r *Registry) Register(id, gpuModel, gpuCategory, zone, fingerprint string)
 	n.GPUCategory = gpuCategory
 	n.Zone = zone
 	n.LastSeen = time.Now()
-	n.Online = true
+	// Sprint 17 : un noeud bloque par l'admin reste hors ligne,
+	// meme s'il continue d'appeler /register.
+	if n.Status != "banned" {
+		n.Online = true
+	}
 
 	// Anti-Sybil : meme machine sous deux identites ?
 	// Uniquement a la creation d'une NOUVELLE identite : une simple
@@ -135,7 +142,7 @@ func (r *Registry) Heartbeat(id string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n, ok := r.nodes[id]
-	if !ok {
+	if !ok || n.Status == "banned" {
 		return false
 	}
 	n.LastSeen = time.Now()
@@ -157,11 +164,64 @@ func (r *Registry) OnlineNodes() []Node {
 	defer r.mu.RUnlock()
 	var out []Node
 	for _, n := range r.nodes {
-		if n.Online {
+		if n.Online && n.Status != "banned" {
 			out = append(out, *n)
 		}
 	}
 	return out
+}
+
+// AllNodes : tous les noeuds connus, pour le dashboard admin
+// (Sprint 17). Le tri se fait cote page.
+func (r *Registry) AllNodes() []Node {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]Node, 0, len(r.nodes))
+	for _, n := range r.nodes {
+		out = append(out, *n)
+	}
+	return out
+}
+
+// SetNodeIP memorise l'IP d'origine d'un noeud (dashboard, Sprint 17).
+func (r *Registry) SetNodeIP(id, ip string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if n, ok := r.nodes[id]; ok {
+		n.IP = ip
+	}
+}
+
+// BanNode bloque un noeud (Sprint 17) : plus aucun travail, ses
+// chunks "running" sont redistribues par le re-scheduler (le noeud
+// passe hors ligne), statut persiste en base.
+func (r *Registry) BanNode(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n, ok := r.nodes[id]
+	if !ok {
+		return false
+	}
+	n.Status = "banned"
+	n.Online = false
+	r.store.SetNodeOnline(n.ID, false)
+	r.store.SaveNode(n)
+	return true
+}
+
+// UnbanNode debloque un noeud : confiance remise a 50, il devra se
+// re-enregistrer pour revenir en ligne.
+func (r *Registry) UnbanNode(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n, ok := r.nodes[id]
+	if !ok {
+		return false
+	}
+	n.Status = "active"
+	n.TrustScore = 50
+	r.store.SaveNode(n)
+	return true
 }
 
 // reaperLoop marque hors-ligne les noeuds sans heartbeat recent
@@ -173,6 +233,7 @@ func (r *Registry) reaperLoop() {
 			if time.Since(n.LastSeen) > heartbeatTimeout && n.Online {
 				n.Online = false
 				r.store.SetNodeOnline(n.ID, false)
+				dashLog("node_offline", n.ID+" passe hors ligne")
 			}
 		}
 		r.mu.Unlock()
