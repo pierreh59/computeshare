@@ -11,6 +11,15 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+// Windows : CREATE_NO_WINDOW. Sans ce drapeau, chaque chunk (ffmpeg,
+// taskkill du chien de garde, cmd echo) ouvre une fenetre console
+// visible chez le fournisseur. Vu en vrai le 5 nov. 2026.
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 #[derive(Deserialize)]
 pub struct ChunkSpec {
     pub chunk_id: String,
@@ -127,6 +136,11 @@ pub fn run_chunk(spec: ChunkSpec) -> ChunkResult {
         b
     };
 
+    // Windows : jamais de fenetre console visible, quel que soit le
+    // processus lance (ffmpeg.exe, cmd /C echo, compute_worker.exe).
+    #[cfg(windows)]
+    builder.creation_flags(CREATE_NO_WINDOW);
+
     let child = match builder
         .current_dir(&dir)
         .stdin(Stdio::null())
@@ -142,11 +156,16 @@ pub fn run_chunk(spec: ChunkSpec) -> ChunkResult {
     let pid = child.id();
     thread::spawn(move || {
         thread::sleep(timeout);
-        let _ = Command::new("taskkill")
+        let mut killer = Command::new("taskkill");
+        killer
             .args(["/PID", &pid.to_string(), "/T", "/F"])
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+            .stderr(Stdio::null());
+        // Windows : le chien de garde ne doit pas non plus flasher
+        // une fenetre console chez le fournisseur.
+        #[cfg(windows)]
+        killer.creation_flags(CREATE_NO_WINDOW);
+        let _ = killer.status();
     });
 
     let output = match child.wait_with_output() {

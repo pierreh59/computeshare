@@ -323,11 +323,18 @@ func main() {
 	http.HandleFunc("/admin/billing/topup", func(w http.ResponseWriter, r *http.Request) {
 		// Sprint 15d : un compte particulier (ou societe non verifiee)
 		// ne peut pas depasser maxParticulierTopupEur de solde.
+		// Fix 5 nov. 2026 : le wrapper relisait le corps deja consomme
+		// par l'ancien handler -> toujours "invalid". Le rechargement
+		// est desormais fait entierement ici.
+		if !requireAdmin(r) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
 		var req struct {
 			OrgID     string  `json:"org_id"`
 			AmountEur float64 `json:"amount_eur"`
 		}
-		if json.NewDecoder(r.Body).Decode(&req) != nil || req.OrgID == "" {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.OrgID == "" {
 			http.Error(w, "invalid", http.StatusBadRequest)
 			return
 		}
@@ -336,7 +343,12 @@ func main() {
 			http.Error(w, "plafond de credits atteint pour un compte particulier (passez le compte en societe verifiee)", http.StatusForbidden)
 			return
 		}
-		adminBillingTopUp(billing).ServeHTTP(w, r)
+		e, err := billing.TopUp(req.OrgID, req.AmountEur)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, e)
 	})
 	http.HandleFunc("/admin/billing/refund", adminBillingRefund(billing))
 
