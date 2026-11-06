@@ -7,6 +7,7 @@ mod hw;
 mod bench;
 mod idle;
 mod sandbox;
+mod container;
 mod jobs;
 mod live;
 mod http;

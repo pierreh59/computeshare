@@ -3,7 +3,7 @@
 //! seulement si la machine est idle, execution dans le sandbox, remontee
 //! du resultat + checksum SHA-256.
 
-use crate::sandbox::{run_chunk, ChunkSpec};
+use crate::sandbox::ChunkSpec;
 use serde::Serialize;
 use std::sync::{Mutex, OnceLock};
 
@@ -146,7 +146,15 @@ fn run_and_report(gateway: &str, chunk: &serde_json::Value) {
     if spec.chunk_id.is_empty() {
         return;
     }
-    let res = run_chunk(spec);
+    // Sprint 19 (v2) : un chunk conteneur est route vers docker/WSL2,
+    // les autres restent dans le sandbox classique.
+    let runtime = chunk["runtime"].as_str().unwrap_or_default().to_string();
+    let image = chunk["image"].as_str().unwrap_or_default().to_string();
+    let res = if runtime == "container" {
+        crate::container::run_container_chunk(&spec, &image)
+    } else {
+        crate::sandbox::run_chunk(spec)
+    };
     let payload = serde_json::json!({
         "chunk_id": res.chunk_id,
         "outcome": res.outcome,

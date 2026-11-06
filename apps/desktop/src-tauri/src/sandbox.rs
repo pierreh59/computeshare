@@ -47,7 +47,7 @@ const MAX_TIMEOUT_SECS: u64 = 3600;
 /// shell, il est execute via cmd/sh avec redirection du resultat.
 const ALLOWED: [&str; 3] = ["compute_worker.exe", "ffmpeg.exe", "echo"];
 
-fn sanitize_id(id: &str) -> String {
+pub(crate) fn sanitize_id(id: &str) -> String {
     id.chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
         .take(64)
@@ -186,14 +186,14 @@ pub fn run_chunk(spec: ChunkSpec) -> ChunkResult {
 }
 
 /// Extrait la fin d'une sortie en texte imprimable (journal borne).
-fn tail_utf8(bytes: &[u8]) -> String {
+pub(crate) fn tail_utf8(bytes: &[u8]) -> String {
     let start = bytes.len().saturating_sub(MAX_DETAIL_BYTES);
     String::from_utf8_lossy(&bytes[start..]).to_string()
 }
 
 /// SHA-256 du fichier produit par le chunk. Sert a verifier la
 /// livraison cote orchestrateur avant de crediter le fournisseur.
-fn hash_file(path: &PathBuf) -> Option<String> {
+pub(crate) fn hash_file(path: &PathBuf) -> Option<String> {
     let mut f = File::open(path).ok()?;
     let mut buf = Vec::new();
     f.read_to_end(&mut buf).ok()?;
