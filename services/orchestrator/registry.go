@@ -22,6 +22,10 @@ type Node struct {
 	// Sprint 17 : IP d'origine (X-Forwarded-For) pour la geolocalisation
 	// du dashboard admin. En memoire uniquement (jamais persistee).
 	IP string `json:"-"`
+	// Sprint 18 (v2) : le noeud annonce s'il peut executer des jobs
+	// conteneur (WSL2 + virtualisation detectes par l'app desktop).
+	// Memoire uniquement : re-declare a chaque register (toutes les 5 s).
+	WSL2Ready bool `json:"wsl2_ready"`
 }
 
 // Registry : map protegee par mutex, avec purge des noeuds silencieux.
@@ -44,7 +48,7 @@ func NewRegistry(store *Store, fraud *Fraud) *Registry {
 // Register ajoute ou rafraichit un noeud (idempotent).
 // LAI-44 : une empreinte machine deja vue sous un autre node_id
 // declenche une alerte Sybil et une penalite de confiance.
-func (r *Registry) Register(id, gpuModel, gpuCategory, zone, fingerprint string) *Node {
+func (r *Registry) Register(id, gpuModel, gpuCategory, zone, fingerprint string, wsl2Ready bool) *Node {
 	if zone == "" {
 		zone = "local"
 	}
@@ -59,6 +63,7 @@ func (r *Registry) Register(id, gpuModel, gpuCategory, zone, fingerprint string)
 	n.GPUCategory = gpuCategory
 	n.Zone = zone
 	n.LastSeen = time.Now()
+	n.WSL2Ready = wsl2Ready
 	// Sprint 17 : un noeud bloque par l'admin reste hors ligne,
 	// meme s'il continue d'appeler /register.
 	if n.Status != "banned" {

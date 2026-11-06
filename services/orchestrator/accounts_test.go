@@ -361,7 +361,7 @@ func TestSuppressionCompteRGPD(t *testing.T) {
 	uid := resp["user"].(map[string]interface{})["id"].(string)
 
 	// Machine liee au compte.
-	reg.Register("node-del1", "Test GPU", "mid", "eu", "")
+	reg.Register("node-del1", "Test GPU", "mid", "eu", "", false)
 	reg.BindSeller("node-del1", uid)
 	if len(reg.NodesOfUser(uid)) != 1 {
 		t.Fatal("machine liee attendue")

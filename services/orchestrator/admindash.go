@@ -167,6 +167,7 @@ type DashNode struct {
 	Lat         float64   `json:"lat"`
 	Lon         float64   `json:"lon"`
 	Work        []DashWork `json:"work"`
+	WSL2Ready   bool       `json:"wsl2_ready"`
 }
 
 // DashJob : un job actif (au moins un chunk non termine).
@@ -274,6 +275,7 @@ func adminDashData(reg *Registry, c *Chunker, f *Fraud, accounts *AccountStore, 
 				ID: n.ID, GPUModel: n.GPUModel, Category: n.GPUCategory,
 				Zone: n.Zone, Status: n.Status, Trust: n.TrustScore,
 				Online: n.Online, LastSeen: n.LastSeen, IP: n.IP,
+				WSL2Ready: n.WSL2Ready,
 			}
 			if n.Online {
 				online++
@@ -555,9 +557,10 @@ function renderBoard(nodes){
     var cls='ncard'+(n.status==='banned'?' banned':(n.online?'':' off'));
     var badge=n.status==='banned'?'<span class="badge ban">BLOQUE</span>':(n.online?'<span class="badge on">En ligne</span>':'<span class="badge off">Hors ligne</span>');
     var trust=n.trust<50?'<span class="badge warn">confiance '+n.trust+'</span>':'confiance '+n.trust;
+    var ctr=n.wsl2_ready?'<span class="badge on">conteneurs OK</span>':'<span class="badge off">conteneurs non</span>';
     h+='<div class="'+cls+'"><h3>'+esc(n.id)+' '+badge+'</h3>';
     h+='<div class="muted">'+esc(n.owner_email||'sans compte fournisseur')+' &#8226; '+esc(n.gpu_model)+' ('+esc(n.gpu_category)+') &#8226; zone '+esc(n.zone)+'</div>';
-    h+='<div class="muted">'+esc(n.country||'')+(n.city?' - '+esc(n.city):'')+' &#8226; vu: '+fmt(n.last_seen)+' &#8226; '+trust+'</div>';
+    h+='<div class="muted">'+esc(n.country||'')+(n.city?' - '+esc(n.city):'')+' &#8226; vu: '+fmt(n.last_seen)+' &#8226; '+trust+' &#8226; '+ctr+'</div>';
     var wl=n.work||[];
     if(wl.length){
       var maxw=Math.min(4,wl.length);

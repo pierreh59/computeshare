@@ -27,6 +27,12 @@ type Job struct {
 	TimeoutSec uint64   `json:"timeout_secs"`
 	Zone       string   `json:"zone,omitempty"`
 	AssetIDs   []string `json:"asset_ids,omitempty"`
+	// Sprint 18 (v2) : runtime d'execution. "" ou "allowlist" = mode
+	// v1 (commande parmi l'allowlist du sandbox desktop) ; "container"
+	// = le noeud tire l'image et l'execute dans WSL2 (adresse de
+	// registre Docker passee par Image).
+	Runtime string `json:"runtime,omitempty"`
+	Image   string `json:"image,omitempty"`
 }
 
 // Chunk : une unite de travail assignee a un seul noeud.
@@ -46,6 +52,9 @@ type Chunk struct {
 	Attempts       int      `json:"attempts,omitempty"`
 	Zone           string   `json:"zone,omitempty"`
 	AssetIDs       []string `json:"asset_ids,omitempty"`
+	// Sprint 18 (v2) : heritage du runtime conteneur du job.
+	Runtime        string   `json:"runtime,omitempty"`
+	Image          string   `json:"image,omitempty"`
 	// LAI-51 : tarif gele a la livraison (EUR / GPU-heure).
 	PriceEurPerHour float64 `json:"price_eur_per_hour,omitempty"`
 	// Paiement calcule a la completion (EUR).
@@ -104,7 +113,24 @@ func (c *Chunker) JobExists(jobID string) bool {
 
 func (c *Chunker) Submit(job Job, orgID string) []*Chunk {
 	nodes := c.reg.OnlineNodes()
-	if len(nodes) == 0 || job.TaskCount <= 0 {
+	if job.TaskCount <= 0 {
+		return nil
+	}
+	// Sprint 18 (v2) : un job conteneur ne part QUE vers les noeuds
+	// qui ont annonce WSL2Ready au register.
+	if job.Runtime == "container" {
+		ready := make([]Node, 0, len(nodes))
+		for _, n := range nodes {
+			if n.WSL2Ready {
+				ready = append(ready, n)
+			}
+		}
+		if len(ready) == 0 {
+			return nil
+		}
+		nodes = ready
+	}
+	if len(nodes) == 0 {
 		return nil
 	}
 	c.mu.Lock()
@@ -125,6 +151,8 @@ func (c *Chunker) Submit(job Job, orgID string) []*Chunk {
 			Status:         "queued",
 			Zone:           job.Zone,
 			AssetIDs:       job.AssetIDs,
+			Runtime:        job.Runtime,
+			Image:          job.Image,
 		}
 		c.chunks = append(c.chunks, ch)
 		out = append(out, ch)
@@ -222,14 +250,21 @@ func (c *Chunker) rescheduleLoop() {
 }
 
 // pickNode choisit un nouveau noeud pour un chunk, en privilegiant
-// la meme zone (data-locality, LAI-28).
+// la meme zone (data-locality, LAI-28). Sprint 18 : un chunk conteneur
+// n'est jamais re-confie a un noeud sans WSL2.
 func pickNode(online []Node, ch *Chunk) string {
 	for _, n := range online {
+		if ch.Runtime == "container" && !n.WSL2Ready {
+			continue
+		}
 		if n.ID != ch.NodeID && n.Zone == ch.Zone {
 			return n.ID
 		}
 	}
 	for _, n := range online {
+		if ch.Runtime == "container" && !n.WSL2Ready {
+			continue
+		}
 		if n.ID != ch.NodeID {
 			return n.ID
 		}

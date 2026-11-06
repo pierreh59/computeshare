@@ -27,8 +27,8 @@ func TestBanNodeExcluDistribution(t *testing.T) {
 	reg, chunker := newTestDash(t)
 
 	// Deux noeuds en ligne.
-	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a")
-	reg.Register("node-b", "GPU B", "prosumer", "europe", "fp-b")
+	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a", false)
+	reg.Register("node-b", "GPU B", "prosumer", "europe", "fp-b", false)
 	if len(reg.OnlineNodes()) != 2 {
 		t.Fatalf("2 noeuds en ligne attendus, %d", len(reg.OnlineNodes()))
 	}
@@ -68,7 +68,7 @@ func TestBanNodeExcluDistribution(t *testing.T) {
 	}
 
 	// Un noeud bloque ne peut pas redevenir en ligne via Register.
-	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a")
+	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a", false)
 	if reg.IsOnline("node-a") {
 		t.Error("un register d'un noeud bloque ne doit pas le remettre en ligne")
 	}
@@ -77,7 +77,7 @@ func TestBanNodeExcluDistribution(t *testing.T) {
 	if !reg.UnbanNode("node-a") {
 		t.Fatal("le deblocage doit reussir")
 	}
-	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a")
+	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a", false)
 	if !reg.IsOnline("node-a") {
 		t.Error("apres deblocage, le register doit remettre le noeud en ligne")
 	}

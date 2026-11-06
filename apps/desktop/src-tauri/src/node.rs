@@ -7,6 +7,26 @@ use crate::sandbox::{run_chunk, ChunkSpec};
 use serde::Serialize;
 use std::sync::{Mutex, OnceLock};
 
+/// Sprint 18 (v2) : detection WSL2 pour les jobs conteneur.
+/// Le noeud annonce sa capacite au register (wsl2_ready). Detection
+/// par `wsl --status` : si la commande reussit, WSL2 est installe.
+#[cfg(windows)]
+fn wsl2_ready() -> bool {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    std::process::Command::new("wsl")
+        .arg("--status")
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(not(windows))]
+fn wsl2_ready() -> bool {
+    false
+}
+
 #[derive(Serialize, Clone)]
 pub struct NodeStatus {
     pub running: bool,
@@ -77,6 +97,7 @@ fn node_loop(gateway: String, node_id: String) {
         "gpu_model": hw.as_ref().map(|h| h.gpu_model.clone()).unwrap_or_default(),
         "gpu_category": hw.as_ref().map(|h| h.gpu_category.clone()).unwrap_or_default(),
         "machine_fingerprint": machine_fingerprint,
+        "wsl2_ready": wsl2_ready(),
     })
     .to_string();
 

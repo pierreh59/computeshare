@@ -28,6 +28,27 @@ func v1Submit(orgs *OrgStore, c *Chunker, b *Billing) http.HandlerFunc {
 			http.Error(w, "invalid job", http.StatusBadRequest)
 			return
 		}
+		// Sprint 18 (v2) : validation du runtime conteneur.
+		if job.Runtime == "" {
+			job.Runtime = "allowlist"
+		}
+		if job.Runtime != "allowlist" && job.Runtime != "container" {
+			http.Error(w, "runtime invalide (allowlist ou container)", http.StatusBadRequest)
+			return
+		}
+		if job.Runtime == "container" {
+			// Image = adresse de registre Docker. On refuse les
+			// espaces et on borne la longueur (pas d'injection).
+			if len(job.Image) == 0 || len(job.Image) > 500 ||
+				strings.ContainsAny(job.Image, " \t\"'`;$|&<>") {
+				http.Error(w, "image de conteneur invalide", http.StatusBadRequest)
+				return
+			}
+			if job.Command == "" {
+				http.Error(w, "commande manquante pour le conteneur", http.StatusBadRequest)
+				return
+			}
+		}
 		// LAI-55 : un job_id deja utilise est refuse (idempotence).
 		if c.JobExists(job.ID) {
 			http.Error(w, "job id already exists", http.StatusConflict)
@@ -35,11 +56,19 @@ func v1Submit(orgs *OrgStore, c *Chunker, b *Billing) http.HandlerFunc {
 		}
 		chunks := c.Submit(job, org.ID)
 		if chunks == nil {
-			http.Error(w, "no node available", http.StatusServiceUnavailable)
+			if job.Runtime == "container" {
+				http.Error(w, "no container-capable node available", http.StatusServiceUnavailable)
+			} else {
+				http.Error(w, "no node available", http.StatusServiceUnavailable)
+			}
 			return
 		}
-		dashLog("job_submit", fmt.Sprintf("job %s soumis par %s (%d taches, %s)",
-			job.ID, org.Name, len(chunks), job.Command))
+		runtimeLabel := job.Runtime
+		if runtimeLabel == "container" {
+			runtimeLabel = "conteneur " + job.Image
+		}
+		dashLog("job_submit", fmt.Sprintf("job %s soumis par %s (%d taches, %s, %s)",
+			job.ID, org.Name, len(chunks), runtimeLabel, job.Command))
 		writeJSON(w, map[string]interface{}{
 			"job_id":     job.ID,
 			"task_count": len(chunks),

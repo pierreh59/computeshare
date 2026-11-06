@@ -12,7 +12,7 @@ import (
 
 // orchestratorVersion : version de l'orchestrateur, affichee sur le
 // dashboard admin et dans /healthz. A incrementer a chaque sprint.
-const orchestratorVersion = "v0.17.0"
+const orchestratorVersion = "v0.18.0"
 
 func main() {
 	port := os.Getenv("PORT")
@@ -82,11 +82,12 @@ func main() {
 	// d'enrolement (en-tete X-Node-Token, cf. nodeauth.go).
 	http.HandleFunc("/register", nodeAuth.withNodeToken(func(w http.ResponseWriter, r *http.Request, sellerID string) {
 		var msg struct {
-			NodeID             string `json:"node_id"`
-			GPUModel           string `json:"gpu_model"`
-			GPUCategory        string `json:"gpu_category"`
-			Zone               string `json:"zone"`
-			MachineFingerprint string `json:"machine_fingerprint"`
+			NodeID              string `json:"node_id"`
+			GPUModel            string `json:"gpu_model"`
+			GPUCategory         string `json:"gpu_category"`
+			Zone                string `json:"zone"`
+			MachineFingerprint  string `json:"machine_fingerprint"`
+			WSL2Ready           bool   `json:"wsl2_ready"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&msg); err != nil || msg.NodeID == "" {
 			http.Error(w, "invalid register", http.StatusBadRequest)
@@ -94,7 +95,7 @@ func main() {
 		}
 		etaitEnLigne := registry.IsOnline(msg.NodeID)
 		writeJSON(w, registry.Register(msg.NodeID, msg.GPUModel,
-			msg.GPUCategory, msg.Zone, msg.MachineFingerprint))
+			msg.GPUCategory, msg.Zone, msg.MachineFingerprint, msg.WSL2Ready))
 		registry.SetNodeIP(msg.NodeID, clientIP(r))
 		if !etaitEnLigne {
 			if registry.IsOnline(msg.NodeID) {
