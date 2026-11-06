@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+// orchestratorVersion : version de l'orchestrateur, affichee sur le
+// dashboard admin et dans /healthz. A incrementer a chaque sprint.
+const orchestratorVersion = "v0.17.0"
+
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -36,7 +40,7 @@ func main() {
 	wallet.Start()
 
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "ok")
+		fmt.Fprintln(w, "ok "+orchestratorVersion)
 	})
 	http.HandleFunc("/nodes", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, registry.OnlineNodes())

@@ -416,8 +416,7 @@ const dashHTML = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ComputeShare - Dashboard admin</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<title>ComputeShare - Dashboard admin</title><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
 :root{color-scheme:dark}
 *{box-sizing:border-box}
@@ -462,7 +461,7 @@ h2{font-size:16px;margin:0}
 </style>
 </head>
 <body>
-<h1>&#129410; ComputeShare - Dashboard admin</h1>
+<h1>&#129410; ComputeShare - Dashboard admin <span style="font-size:16px;color:#8aa">(__VER__)</span></h1>
 <div class="row">
 <input id="akey" type="password" placeholder="Cle admin" size="34">
 <button id="save">Enregistrer la cle</button>
@@ -644,5 +643,5 @@ timer=setInterval(load,10000);
 // GET /admin/dashboard : la page (les donnees exigent la cle admin).
 func dashboardPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(dashHTML))
+	w.Write([]byte(strings.Replace(dashHTML, "__VER__", orchestratorVersion, 1)))
 }
