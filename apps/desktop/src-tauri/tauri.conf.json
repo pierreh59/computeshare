@@ -1,5 +1,5 @@
 {
-  "version": "0.2.3",
+  "version": "0.2.4",
   "productName": "ComputeShare",
   "identifier": "com.computeshare.desktop",
   "build": {
@@ -22,7 +22,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJEQkFDMDA1NTg2QjAzQjYKUldXMkEydFlCY0M2dmNldDVFem1tVlpmcWxVZGx6ZFM0bE5HNGM4T3lTZlZqSmh4SUZSd3VUSFcK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ2N0FEQzE1NTY3OTYyMTcKUldRWFlubFdGZHg2UmhZR24vRzVoZ2MzTTRma3VJTVA4bGxFZm9jNUJ6STlyMDVINElJVnd5RHAK",
       "endpoints": [
         "https://github.com/pierreh59/computeshare/releases/latest/download/latest.json"
       ]
