@@ -1,7 +1,13 @@
 //! Sprint 19 (v2) - Execution des chunks de type conteneur.
-//! Un chunk runtime=="container" tourne via `wsl docker run` dans un
-//! dossier sandbox monte sur /work. Meme modele de resultat que le
-//! sandbox classique : outcome + detail borne + checksum SHA-256.
+//! Un chunk runtime=="container" tourne via `docker run` (Docker Desktop,
+//! cote Windows) dans un dossier sandbox monte sur /work. Meme modele de
+//! resultat que le sandbox classique : outcome + detail + SHA-256.
+//!
+//! Sprint 19b : on n'utilise PLUS `wsl docker`. Vu en vrai le 6 nov. chez
+//! Pierre : la distribution WSL par defaut de son PC est celle de Salad
+//! (compte verrouille, "This account is currently not available"), donc
+//! `wsl <cmd>` ne peut pas marcher. docker.exe (installe par Docker
+//! Desktop dans le PATH Windows) fonctionne lui sans WSL par defaut.
 
 use crate::sandbox::{hash_file, sanitize_id, tail_utf8, ChunkResult, ChunkSpec};
 use std::time::{Duration, Instant};
@@ -16,15 +22,13 @@ pub(crate) fn image_valide(image: &str) -> bool {
         && image.len() <= 500
         && !image.chars().any(|c| {
             c.is_whitespace()
-                || matches!(
-                    c,
-                    '"' | '\'' | '\\' | '`' | ';' | '$' | '|' | '&' | '<' | '>'
-                )
+                || matches!(c, '"' | '\'' | '\\' | '`' | ';' | '$' | '|' | '&' | '<' | '>')
         })
 }
 
-/// Sprint 19 : execution conteneur. Windows uniquement, via WSL2 +
-/// Docker (Docker Desktop backend WSL2 ou docker dans la distro).
+/// Sprint 19 : execution conteneur. Windows uniquement, via docker.exe
+/// (Docker Desktop). Le dossier sandbox Windows est monte directement
+/// sur /work (Docker Desktop accepte les chemins Windows en /).
 #[cfg(windows)]
 pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str) -> ChunkResult {
     use std::os::windows::process::CommandExt;
@@ -45,9 +49,10 @@ pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str) -> ChunkResult 
         return mk("rejected", "reference d'image conteneur invalide", None);
     }
 
-    // Docker doit etre disponible dans WSL2.
-    let docker_ok = Command::new("wsl")
-        .args(["sh", "-lc", "command -v docker"])
+    // Docker Desktop doit etre lance : `docker version` ne reussit que
+    // si le daemon repond (docker --version reussirait meme daemon arrete).
+    let docker_ok = Command::new("docker")
+        .arg("version")
         .creation_flags(CREATE_NO_WINDOW)
         .output()
         .map(|o| o.status.success())
@@ -55,12 +60,12 @@ pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str) -> ChunkResult 
     if !docker_ok {
         return mk(
             "failed",
-            "docker introuvable dans WSL2 (installez Docker Desktop avec le backend WSL2)",
+            "docker introuvable ou arrete (installez/lancez Docker Desktop)",
             None,
         );
     }
 
-    // Dossier sandbox Windows -> chemin WSL pour le montage.
+    // Dossier sandbox Windows, monte tel quel dans le conteneur.
     let dir = std::env::temp_dir()
         .join("computeshare-sandbox")
         .join(sanitize_id(&spec.chunk_id));
@@ -68,24 +73,8 @@ pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str) -> ChunkResult 
     if std::fs::create_dir_all(&dir).is_err() {
         return mk("failed", "impossible de creer le repertoire sandbox", None);
     }
-    let win_path = match dir.canonicalize() {
-        Ok(p) => p,
-        Err(_) => return mk("failed", "repertoire sandbox illisible", None),
-    };
-
-    let wsl_mount = match Command::new("wsl")
-        .arg("wslpath")
-        .arg("-a")
-        .arg(win_path.to_string_lossy().as_ref())
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-    {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
-        _ => return mk("failed", "conversion du chemin vers WSL2 impossible", None),
-    };
-    if wsl_mount.is_empty() {
-        return mk("failed", "chemin WSL2 vide", None);
-    }
+    // Docker accepte les chemins Windows avec des / : C:/Users/...
+    let win_mount = dir.to_string_lossy().replace('\\', "/");
 
     let cname = format!("cs-{}", sanitize_id(&spec.chunk_id));
 
@@ -106,11 +95,10 @@ pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str) -> ChunkResult 
             .collect()
     };
 
-    let mut builder = Command::new("wsl");
+    let mut builder = Command::new("docker");
     builder
-        .arg("docker")
+        .arg("run")
         .args([
-            "run",
             "--rm",
             "--name",
             &cname,
@@ -119,7 +107,7 @@ pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str) -> ChunkResult 
             "--cpus",
             "2",
             "-v",
-            &format!("{wsl_mount}:/work"),
+            &format!("{win_mount}:/work"),
             "-w",
             "/work",
         ])
@@ -140,7 +128,7 @@ pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str) -> ChunkResult 
         Err(e) => return mk("failed", &format!("spawn docker: {e}"), None),
     };
 
-    // Chien de garde : taskkill sur l'arbre wsl.exe + docker rm -f.
+    // Chien de garde : taskkill sur l'arbre docker.exe + docker rm -f.
     let pid = child.id();
     let cname_w = cname.clone();
     std::thread::spawn(move || {
@@ -150,8 +138,8 @@ pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str) -> ChunkResult 
         killer.stdout(Stdio::null()).stderr(Stdio::null());
         killer.creation_flags(CREATE_NO_WINDOW);
         let _ = killer.status();
-        let _ = Command::new("wsl")
-            .args(["docker", "rm", "-f", &cname_w])
+        let _ = Command::new("docker")
+            .args(["rm", "-f", &cname_w])
             .creation_flags(CREATE_NO_WINDOW)
             .status();
     });
