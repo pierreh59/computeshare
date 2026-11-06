@@ -93,7 +93,11 @@ func main() {
 			msg.GPUCategory, msg.Zone, msg.MachineFingerprint))
 		registry.SetNodeIP(msg.NodeID, clientIP(r))
 		if !etaitEnLigne {
-			dashLog("node_register", "noeud "+msg.NodeID+" en ligne ("+msg.GPUModel+", zone "+msg.Zone+")")
+			if registry.IsOnline(msg.NodeID) {
+				dashLog("node_register", "noeud "+msg.NodeID+" en ligne ("+msg.GPUModel+", zone "+msg.Zone+")")
+			} else {
+				dashLog("fraud", "noeud "+msg.NodeID+" tente de s'enregistrer mais il est bloque par l'admin")
+			}
 		}
 		// Sprint 15 : jeton personnel -> le noeud devient la
 		// propriete du compte vendeur.
