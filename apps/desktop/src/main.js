@@ -8,6 +8,11 @@
     if (!window.__TAURI__) throw new Error("API Tauri indisponible");
     const inv = window.__TAURI__.core.invoke;
 
+    // Version de l'app, affichee dans l'en-tete (pour verifier d'un
+    // coup d'oeil quelle version tourne, surtout apres une maj auto).
+    let ver = "";
+    try { ver = await inv("plugin:app|version"); } catch (e) { ver = ""; }
+
     function esc(s) {
       const d = document.createElement("div");
       d.textContent = s == null ? "" : String(s);
@@ -19,7 +24,7 @@
     if (!st.logged_in) {
       // ---------- ECRAN CONNEXION ----------
       app.innerHTML = `
-        <h1>ComputeShare</h1>
+        <h1>ComputeShare${ver ? ' <span style="font-size:13px;color:#94a3b8">v' + esc(ver) + '</span>' : ""}</h1>
         <p>Connectez-vous avec votre compte fournisseur pour proposer la puissance de votre machine.</p>
         <div class="cs-card" style="max-width:420px">
           <label>E-mail</label><br>
@@ -69,7 +74,7 @@
     try { auto = await inv("plugin:autostart|is_enabled"); } catch (e) { auto = false; }
 
     app.innerHTML = `
-      <h1>ComputeShare <span style="font-size:13px;color:#94a3b8">— ${esc(st.email)} (${esc(st.node_id)})</span></h1>
+      <h1>ComputeShare <span style="font-size:13px;color:#94a3b8">— ${esc(st.email)} (${esc(st.node_id)})${ver ? " — v" + esc(ver) : ""}</span></h1>
       <p>${esc(hw.gpu_model)} (${esc(hw.gpu_category)}) — ${hw.cpu_cores} cœurs — ${hw.ram_gb} Go RAM</p>
       <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:16px">
         <div class="cs-stat"><div class="cs-stat-label">Gains cumulés</div>
