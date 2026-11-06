@@ -87,15 +87,19 @@ func (b *Billing) TopUp(orgID string, amountEur float64) (*BillingEvent, error) 
 }
 
 // Refund rembourse des credits (admin, LAI-32) : nouvelle ecriture
-// positive, jamais d'annulation d'historique.
+// negative, jamais d'annulation d'historique. Le remboursement RETIRE
+// des credits (argent rendu a l'entreprise), il ne peut pas depasser le solde.
 func (b *Billing) Refund(orgID string, amountEur float64, ref string) (*BillingEvent, error) {
 	if amountEur <= 0 {
 		return nil, fmt.Errorf("montant de remboursement invalide")
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.balances[orgID] += amountEur
-	return b.append(orgID, "refund", amountEur, 0, 0, ref), nil
+	if b.balances[orgID] < amountEur {
+		return nil, fmt.Errorf("solde insuffisant pour rembourser")
+	}
+	b.balances[orgID] -= amountEur
+	return b.append(orgID, "refund", -amountEur, 0, 0, ref), nil
 }
 
 // Balance retourne les credits restants d'une organisation.
