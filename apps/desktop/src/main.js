@@ -88,6 +88,18 @@
       </div>
       <p id="state" style="margin-top:16px">...</p>
       <div class="cs-card" style="margin-top:10px;max-width:640px">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <button id="availbtn" style="font-weight:bold">...</button>
+          <span id="availmsg" style="font-size:13px;color:#94a3b8"></span>
+        </div>
+        <canvas id="actgraph" width="620" height="140" style="margin-top:12px;width:100%;max-width:620px;background:#0f172a;border-radius:8px"></canvas>
+        <div style="margin-top:6px;font-size:12px;color:#94a3b8">
+          <span style="color:#60a5fa">&#9644; CPU</span> &nbsp;
+          <span style="color:#4ade80">&#9644; GPU</span> &nbsp;
+          <span style="color:#f59e0b">&#9644; ComputeShare au travail</span> &nbsp; (1 derniere heure)
+        </div>
+      </div>
+      <div class="cs-card" style="margin-top:10px;max-width:640px">
         <label><input type="checkbox" id="autostart" ${auto ? "checked" : ""}> Lancer ComputeShare au démarrage de Windows</label>
         <span id="autoerr" style="color:#f87171;margin-left:8px"></span>
         <div style="margin-top:12px">
@@ -185,6 +197,71 @@
       }
     };
 
+    // Sprint 21 : interrupteur manuel Disponible / En pause.
+    let manualOn = true;
+    try { const a0 = await inv("get_activity"); manualOn = a0.manual_on; } catch (e) {}
+    const availBtn = document.querySelector("#availbtn");
+    const renderAvailBtn = () => {
+      availBtn.textContent = manualOn ? "\u23F8 Mettre en pause" : "\u25B6 Remettre disponible";
+      availBtn.style.background = manualOn ? "#1e293b" : "#166534";
+      availBtn.style.color = manualOn ? "#e2e8f0" : "#ffffff";
+    };
+    renderAvailBtn();
+    availBtn.onclick = async () => {
+      manualOn = !manualOn;
+      renderAvailBtn();
+      try { await inv("set_available", { on: manualOn }); }
+      catch (err) { manualOn = !manualOn; renderAvailBtn(); }
+    };
+
+    // Sprint 21 : graphe d'activite (CPU, GPU, periodes de travail).
+    const drawActivity = (act) => {
+      const cv = document.querySelector("#actgraph");
+      if (!cv) return;
+      const g = cv.getContext("2d");
+      const W = cv.width, H = cv.height;
+      g.clearRect(0, 0, W, H);
+      g.strokeStyle = "#1e293b";
+      g.lineWidth = 1;
+      for (let y = 0; y <= 4; y++) {
+        const py = Math.round(y * H / 4) + 0.5;
+        g.beginPath(); g.moveTo(0, py); g.lineTo(W, py); g.stroke();
+      }
+      const s = act.samples || [];
+      if (!s.length) return;
+      const step = W / Math.max(s.length - 1, 1);
+      // Fond orange sur les periodes ou un chunk tournait.
+      g.fillStyle = "rgba(245,158,11,0.18)";
+      for (let i = 0; i < s.length; i++) {
+        if (s[i].working) {
+          g.fillRect(Math.round(i * step) - step / 2, 0, Math.max(step, 1.5), H);
+        }
+      }
+      const line = (vals, color) => {
+        g.strokeStyle = color;
+        g.lineWidth = 1.5;
+        g.beginPath();
+        for (let i = 0; i < s.length; i++) {
+          const px = i * step;
+          const py = H - (Math.min(vals(s[i]), 100) / 100) * (H - 2) - 1;
+          if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+        }
+        g.stroke();
+      };
+      line((x) => x.cpu, "#60a5fa");
+      if (act.gpu_present) line((x) => x.gpu, "#4ade80");
+      // Message de disponibilite.
+      const msg = document.querySelector("#availmsg");
+      const c = Math.round(act.cpu), gp = act.gpu;
+      if (!act.manual_on) {
+        msg.textContent = "En pause : le noeud ne prend aucun travail (bouton manuel).";
+      } else if (act.available) {
+        msg.textContent = "Disponible : accepte du travail (CPU " + c + "% / seuil " + Math.round(act.cpu_max) + "%, GPU " + gp + "% / seuil " + act.gpu_max + "%).";
+      } else {
+        msg.textContent = "En attente : charge trop elevee (CPU " + c + "% / seuil " + Math.round(act.cpu_max) + "%, GPU " + gp + "% / seuil " + act.gpu_max + "%).";
+      }
+    };
+
     async function refresh() {
       try {
         const s = await inv("get_live_stats");
@@ -200,6 +277,7 @@
             ? " — noeud en ligne : " + n.chunks_done + " ok / " + n.chunks_failed + " échecs" +
               (n.last_error ? " — " + n.last_error : "")
             : " — noeud arrêté";
+        try { drawActivity(await inv("get_activity")); } catch (e) { /* graphe au suivant */ }
       } catch (e) { /* rafraichissement suivant */ }
     }
     refresh();

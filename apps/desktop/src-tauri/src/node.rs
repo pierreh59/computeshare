@@ -117,10 +117,8 @@ fn node_loop(gateway: String, node_id: String) {
             None => set_error("gateway injoignable"),
         }
 
-        // 2. Claim un chunk seulement si le noeud est disponible :
-        // bouton On/Off + charge CPU/GPU sous les seuils (sprint 21).
-        crate::availability::ensure_sampler();
-        if crate::availability::available() {
+        // 2. Claim un chunk seulement si la machine est idle (LAI-21).
+        if crate::idle::get_idle_status().should_mine {
             if let Some(r) = crate::http::get(&gateway, &format!("/chunks?node_id={}", node_id)) {
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&r.body) {
                     if v.is_object() {
@@ -135,9 +133,28 @@ fn node_loop(gateway: String, node_id: String) {
 }
 
 fn run_and_report(gateway: &str, chunk: &serde_json::Value) {
-    crate::availability::set_working(true);
-    let res = run_chunk_gateway(gateway, chunk);
-    crate::availability::set_working(false);
+    let spec = ChunkSpec {
+        chunk_id: chunk["id"].as_str().unwrap_or_default().to_string(),
+        command: chunk["command"].as_str().unwrap_or_default().to_string(),
+        args: chunk["args"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+            .unwrap_or_default(),
+        expected_output: chunk["expected_output"].as_str().unwrap_or_default().to_string(),
+        timeout_secs: chunk["timeout_secs"].as_u64().unwrap_or(0),
+    };
+    if spec.chunk_id.is_empty() {
+        return;
+    }
+    // Sprint 19 (v2) : un chunk conteneur est route vers docker/WSL2,
+    // les autres restent dans le sandbox classique.
+    let runtime = chunk["runtime"].as_str().unwrap_or_default().to_string();
+    let image = chunk["image"].as_str().unwrap_or_default().to_string();
+    let res = if runtime == "container" {
+        crate::container::run_container_chunk(&spec, &image)
+    } else {
+        crate::sandbox::run_chunk(spec)
+    };
     let payload = serde_json::json!({
         "chunk_id": res.chunk_id,
         "outcome": res.outcome,
@@ -154,40 +171,6 @@ fn run_and_report(gateway: &str, chunk: &serde_json::Value) {
     } else {
         st.chunks_failed += 1;
         st.last_error = format!("{}: {}", res.outcome, res.detail);
-    }
-}
-
-/// Sprint 21 : le chunk est extrait dans une fonction separee pour que
-/// le marquage "working" (graphe d'activite) encadre toute l'execution,
-/// sandbox ou conteneur.
-fn run_chunk_gateway(gateway: &str, chunk: &serde_json::Value) -> crate::sandbox::ChunkResult {
-    let spec = ChunkSpec {
-        chunk_id: chunk["id"].as_str().unwrap_or_default().to_string(),
-        command: chunk["command"].as_str().unwrap_or_default().to_string(),
-        args: chunk["args"]
-            .as_array()
-            .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
-            .unwrap_or_default(),
-        expected_output: chunk["expected_output"].as_str().unwrap_or_default().to_string(),
-        timeout_secs: chunk["timeout_secs"].as_u64().unwrap_or(0),
-    };
-    if spec.chunk_id.is_empty() {
-        return crate::sandbox::ChunkResult {
-            chunk_id: String::new(),
-            outcome: "rejected".into(),
-            detail: "chunk sans identifiant".into(),
-            duration_ms: 0,
-            output_sha256: None,
-        };
-    }
-    // Sprint 19 (v2) : un chunk conteneur est route vers docker,
-    // les autres restent dans le sandbox classique.
-    let runtime = chunk["runtime"].as_str().unwrap_or_default().to_string();
-    let image = chunk["image"].as_str().unwrap_or_default().to_string();
-    if runtime == "container" {
-        crate::container::run_container_chunk(&spec, &image)
-    } else {
-        crate::sandbox::run_chunk(spec)
     }
 }
 
