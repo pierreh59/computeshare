@@ -57,6 +57,9 @@ type Chunk struct {
 	Attempts       int      `json:"attempts,omitempty"`
 	Zone           string   `json:"zone,omitempty"`
 	AssetIDs       []string `json:"asset_ids,omitempty"`
+	// Sprint 27 : manifeste des assets d'entree (nom de fichier,
+	// sha256, taille), embarque dans le chunk livre au noeud.
+	Assets []AssetRef `json:"assets,omitempty"`
 	// Sprint 22 : heure de derniere mise en route (memoire seulement).
 	// Le re-scheduler ne redistribue plus un chunk tant que son timeout
 	// n'est pas expire, meme si le noeud parait hors ligne (vu en vrai :

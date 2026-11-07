@@ -188,7 +188,7 @@ fn node_loop(gateway: String, node_id: String) {
 
 fn run_and_report(gateway: &str, node_id: &str, chunk: &serde_json::Value) {
     crate::availability::set_working(true);
-    let res = run_chunk_gateway(gateway, chunk);
+    let res = run_chunk_gateway(gateway, node_id, chunk);
     crate::availability::set_working(false);
     let payload = serde_json::json!({
         "chunk_id": res.chunk_id,
@@ -268,10 +268,91 @@ fn run_and_report(gateway: &str, node_id: &str, chunk: &serde_json::Value) {
     }
 }
 
+/// Sprint 27 : un asset d'entree telecharge et verifie, pret a etre
+/// copie dans le dossier monte sur /work du conteneur.
+pub struct FetchedAsset {
+    pub filename: String,
+    pub local_path: String,
+}
+
+/// Sprint 27 : telecharge les assets d'entree d'un chunk (manifeste
+/// embarque dans le chunk livre par /chunks), verifie le sha256 de
+/// chaque fichier, les pose dans %TEMP%/computeshare-assets/<chunk>/.
+/// Chaque etape est tracee (lecon du sprint 26 : un parcours qui
+/// echoue silencieusement coute des heures de debug).
+fn fetch_assets(
+    gateway: &str,
+    node_id: &str,
+    chunk: &serde_json::Value,
+) -> Result<Vec<FetchedAsset>, String> {
+    let chunk_id = chunk["id"].as_str().unwrap_or_default().to_string();
+    let entries = match chunk["assets"].as_array() {
+        Some(a) if !a.is_empty() => a.clone(),
+        _ => return Ok(Vec::new()),
+    };
+    let dir = std::env::temp_dir()
+        .join("computeshare-assets")
+        .join(crate::sandbox::sanitize_id(&chunk_id));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("creation du dossier assets : {e}"))?;
+    let mut out = Vec::new();
+    for e in entries {
+        let asset_id = e["asset_id"].as_str().unwrap_or_default().to_string();
+        let filename = crate::container::sanitize_asset_filename(
+            e["filename"].as_str().unwrap_or_default(),
+        );
+        let sha_attendu = e["sha256"].as_str().unwrap_or_default().to_string();
+        if asset_id.is_empty() || filename.is_empty() {
+            return Err("manifeste d'asset invalide".into());
+        }
+        let path = dir.join(&filename);
+        trace(&format!(
+            "{} telechargement de l'asset {} ({})",
+            chunk_id, asset_id, filename
+        ));
+        let url_path = format!(
+            "/v1/assets/{}/node-download?node_id={}&chunk_id={}",
+            asset_id, node_id, chunk_id
+        );
+        match crate::http::get_file(gateway, &url_path, &path) {
+            Some(r) if r.status == 200 => {}
+            Some(r) => return Err(format!("asset {} refuse : HTTP {}", asset_id, r.status)),
+            None => return Err(format!("asset {} : gateway injoignable", asset_id)),
+        }
+        // Integrite : un fichier corrompu ne doit JAMAIS entrer dans
+        // un conteneur.
+        match crate::sandbox::hash_file(&path) {
+            Some(sha) if sha == sha_attendu => {}
+            Some(_) => {
+                return Err(format!(
+                    "asset {} corrompu (sha256 different de l'annonce)",
+                    asset_id
+                ))
+            }
+            None => {
+                return Err(format!(
+                    "asset {} introuvable apres telechargement",
+                    asset_id
+                ))
+            }
+        }
+        trace(&format!("{} asset {} sha OK", chunk_id, asset_id));
+        out.push(FetchedAsset {
+            filename,
+            local_path: path.to_string_lossy().into_owned(),
+        });
+    }
+    Ok(out)
+}
+
 /// Sprint 21 : le chunk est extrait dans une fonction separee pour que
 /// le marquage "working" (graphe d'activite) encadre toute l'execution,
 /// sandbox ou conteneur.
-fn run_chunk_gateway(gateway: &str, chunk: &serde_json::Value) -> crate::sandbox::ChunkResult {
+fn run_chunk_gateway(
+    gateway: &str,
+    node_id: &str,
+    chunk: &serde_json::Value,
+) -> crate::sandbox::ChunkResult {
     let spec = ChunkSpec {
         chunk_id: chunk["id"].as_str().unwrap_or_default().to_string(),
         command: chunk["command"].as_str().unwrap_or_default().to_string(),
@@ -300,7 +381,24 @@ fn run_chunk_gateway(gateway: &str, chunk: &serde_json::Value) -> crate::sandbox
         // Sprint 25 : le job peut demander le GPU ("gpu": true) - le
         // conteneur est alors lance avec --gpus all (toujours durci).
         let gpu = chunk["gpu"].as_bool().unwrap_or(false);
-        crate::container::run_container_chunk(&spec, &image, gpu)
+        // Sprint 27 : les assets d'entree sont telecharges et
+        // verifies AVANT le conteneur ; en cas d'echec le chunk
+        // echoue proprement (detail visible dans le journal admin).
+        let assets = match fetch_assets(gateway, node_id, chunk) {
+            Ok(a) => a,
+            Err(e) => {
+                trace(&format!("{} assets d'entree en echec : {}", spec.chunk_id, e));
+                return crate::sandbox::ChunkResult {
+                    chunk_id: spec.chunk_id,
+                    outcome: "failed".into(),
+                    detail: format!("assets d'entree : {e}"),
+                    duration_ms: 0,
+                    output_sha256: None,
+                    output_path: None,
+                };
+            }
+        };
+        crate::container::run_container_chunk(&spec, &image, gpu, &assets)
     } else {
         crate::sandbox::run_chunk(spec)
     }

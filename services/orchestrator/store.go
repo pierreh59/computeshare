@@ -217,6 +217,30 @@ func (s *Store) GetAsset(id string) *Asset {
 	return &a
 }
 
+// Sprint 27 : LoadAssets recharge les metadonnees de TOUS les assets
+// au demarrage (les fichiers restent sur le volume ASSETS_DIR).
+func (s *Store) LoadAssets() []*Asset {
+	if !s.enabled() {
+		return nil
+	}
+	rows, err := s.db.Query(`SELECT id, org_id, filename, sha256, size_bytes, zone
+		FROM runtime_assets`)
+	if err != nil {
+		log.Printf("store.LoadAssets: %v", err)
+		return nil
+	}
+	defer rows.Close()
+	out := []*Asset{}
+	for rows.Next() {
+		var a Asset
+		if err := rows.Scan(&a.ID, &a.OrgID, &a.Filename, &a.SHA256,
+			&a.SizeBytes, &a.Zone); err == nil {
+			out = append(out, &a)
+		}
+	}
+	return out
+}
+
 // --- Sprint 12 : wallet & ledger (LAI-34/35/36) ---
 
 // SaveLedger ajoute une ecriture au grand livre (append-only, LAI-34).

@@ -27,11 +27,29 @@ pub(crate) fn image_valide(image: &str) -> bool {
         })
 }
 
+/// Sprint 27 : nom de fichier d'asset assaini - alphanumerique,
+/// point, tiret, underscore, 64 caracteres max. Pas de separateur,
+/// pas de traversal ("../"), pas de caracteres speciaux Windows : le
+/// nom vient du client, on ne le fait JAMAIS confiance.
+pub(crate) fn sanitize_asset_filename(name: &str) -> String {
+    let s: String = name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '-' || *c == '_')
+        .take(64)
+        .collect();
+    s.trim_start_matches('.').to_string()
+}
+
 /// Sprint 19 : execution conteneur. Windows uniquement, via docker.exe
 /// (Docker Desktop). Le dossier sandbox Windows est monte directement
 /// sur /work (Docker Desktop accepte les chemins Windows en /).
 #[cfg(windows)]
-pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str, gpu: bool) -> ChunkResult {
+pub(crate) fn run_container_chunk(
+    spec: &ChunkSpec,
+    image: &str,
+    gpu: bool,
+    assets: &[crate::node::FetchedAsset],
+) -> ChunkResult {
     use std::os::windows::process::CommandExt;
     use std::process::{Command, Stdio};
 
@@ -78,6 +96,21 @@ pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str, gpu: bool) -> C
     }
     // Docker accepte les chemins Windows avec des / : C:/Users/...
     let win_mount = dir.to_string_lossy().replace('\\', "/");
+
+    // Sprint 27 : pose des assets d'entree dans le dossier monte sur
+    // /work AVANT le lancement du conteneur. Ils sont deja telecharges
+    // (sha256 verifie) cote node.
+    for a in assets {
+        let dest = dir.join(&a.filename);
+        if let Err(e) = std::fs::copy(&a.local_path, &dest) {
+            return mk(
+                "failed",
+                &format!("copie de l'asset {} : {e}", a.filename),
+                None,
+                None,
+            );
+        }
+    }
 
     let cname = format!("cs-{}", sanitize_id(&spec.chunk_id));
 
@@ -203,7 +236,12 @@ pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str, gpu: bool) -> C
 }
 
 #[cfg(not(windows))]
-pub(crate) fn run_container_chunk(_spec: &ChunkSpec, _image: &str, _gpu: bool) -> ChunkResult {
+pub(crate) fn run_container_chunk(
+    _spec: &ChunkSpec,
+    _image: &str,
+    _gpu: bool,
+    _assets: &[crate::node::FetchedAsset],
+) -> ChunkResult {
     ChunkResult {
         chunk_id: _spec.chunk_id.clone(),
         outcome: "rejected".into(),
@@ -216,7 +254,7 @@ pub(crate) fn run_container_chunk(_spec: &ChunkSpec, _image: &str, _gpu: bool) -
 
 #[cfg(test)]
 mod tests {
-    use super::image_valide;
+    use super::{image_valide, sanitize_asset_filename};
 
     #[test]
     fn accepte_images_normales() {
@@ -258,5 +296,22 @@ mod tests {
         ] {
             assert!(!image_valide(bad), "devrait refuser : {bad}");
         }
+    }
+
+    // Sprint 27 : noms de fichiers d'assets assainis.
+    #[test]
+    fn assainit_noms_d_assets() {
+        assert_eq!(sanitize_asset_filename("donnees.csv"), "donnees.csv");
+        // Tentative de traversal : separateurs filtres, points de
+        // tete supprimes.
+        assert_eq!(sanitize_asset_filename("..\\..\\win.ini"), "win.ini");
+        assert_eq!(sanitize_asset_filename("../../etc/passwd"), "etcpasswd");
+        assert_eq!(sanitize_asset_filename("rapport final.pdf"), "rapportfinal.pdf");
+        assert_eq!(sanitize_asset_filename(""), "");
+        assert_eq!(sanitize_asset_filename(".."), "");
+        assert_eq!(
+            sanitize_asset_filename(&"a".repeat(100)),
+            "a".repeat(64)
+        );
     }
 }

@@ -12,7 +12,7 @@ import (
 
 // orchestratorVersion : version de l'orchestrateur, affichee sur le
 // dashboard admin et dans /healthz. A incrementer a chaque sprint.
-const orchestratorVersion = "v0.21.4"
+const orchestratorVersion = "v0.22.0"
 
 func main() {
 	port := os.Getenv("PORT")
@@ -30,6 +30,8 @@ func main() {
 	billing := NewBilling(store)
 	chunker := NewChunker(registry, pricing, store, fraud, wallet, billing)
 	orgs := NewOrgStore(store)
+	// Sprint 27 : metadonnees des assets clients (entrees de job).
+	assets := NewAssetStore(store)
 	accounts := NewAccountStore(store, orgs)
 	orgs.SetAccountAuth(accounts.Authenticate)
 	nodeAuth := NewNodeAuth(accounts)
@@ -118,7 +120,8 @@ func main() {
 	}))
 	http.HandleFunc("/jobs", submitJob(chunker))
 	http.HandleFunc("/chunks", nodeAuth.withNodeToken(func(w http.ResponseWriter, r *http.Request, _ string) {
-		nextChunk(chunker).ServeHTTP(w, r)
+		// Sprint 27 : le chunk livre embarque le manifeste des assets.
+		nextChunkWithAssets(chunker, assets).ServeHTTP(w, r)
 	}))
 	http.HandleFunc("/chunk_result", nodeAuth.withNodeToken(func(w http.ResponseWriter, r *http.Request, _ string) {
 		completeChunk(chunker).ServeHTTP(w, r)
@@ -340,7 +343,7 @@ func main() {
 			v1JobsList(orgs, chunker, billing).ServeHTTP(w, r)
 			return
 		}
-		v1Submit(orgs, chunker, billing).ServeHTTP(w, r)
+		v1Submit(orgs, assets, chunker, billing).ServeHTTP(w, r)
 	})
 	http.HandleFunc("/v1/jobs/", func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -361,13 +364,20 @@ func main() {
 	go purgeResultsLoop(store)
 
 	// LAI-28 : object store des assets clients (auth Bearer).
-	http.HandleFunc("/v1/assets", v1UploadAsset(orgs, store))
+	http.HandleFunc("/v1/assets", v1UploadAsset(orgs, assets))
 	http.HandleFunc("/v1/assets/", func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/download") {
-			v1DownloadAsset(orgs, store).ServeHTTP(w, r)
-			return
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/node-download"):
+			// Sprint 27 : telechargement d'un asset par le noeud qui
+			// execute le chunk (jeton de noeud, chunk concerne).
+			nodeAuth.withNodeToken(func(w http.ResponseWriter, r2 *http.Request, _ string) {
+				v1NodeDownloadAsset(assets, chunker).ServeHTTP(w, r2)
+			}).ServeHTTP(w, r)
+		case strings.HasSuffix(r.URL.Path, "/download"):
+			v1DownloadAsset(orgs, assets).ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
 		}
-		http.NotFound(w, r)
 	})
 
 	// Sprint 13 - Console B2B + billing (LAI-31/32).

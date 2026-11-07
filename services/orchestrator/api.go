@@ -12,7 +12,8 @@ import (
 
 // POST /v1/jobs : soumet un job, decoupe en chunks par le chunker.
 // LAI-32 : refused si l'organisation n'a plus de credits prepayes.
-func v1Submit(orgs *OrgStore, c *Chunker, b *Billing) http.HandlerFunc {
+// Sprint 27 : chaque asset reference doit appartenir a l'org.
+func v1Submit(orgs *OrgStore, assets *AssetStore, c *Chunker, b *Billing) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		org := orgs.Authenticate(r)
 		if org == nil {
@@ -54,6 +55,15 @@ func v1Submit(orgs *OrgStore, c *Chunker, b *Billing) http.HandlerFunc {
 			http.Error(w, "job id already exists", http.StatusConflict)
 			return
 		}
+		// Sprint 27 : un job ne peut referencer que les assets de
+		// SON organisation (sinon : lecture des donnees d'autrui).
+		for _, id := range job.AssetIDs {
+			a := assets.Get(id)
+			if a == nil || a.OrgID != org.ID {
+				http.Error(w, "asset inconnu ou non possede : "+id, http.StatusBadRequest)
+				return
+			}
+		}
 		chunks := c.Submit(job, org.ID)
 		if chunks == nil {
 			if job.Gpu {
@@ -71,6 +81,10 @@ func v1Submit(orgs *OrgStore, c *Chunker, b *Billing) http.HandlerFunc {
 		}
 		if job.Gpu {
 			runtimeLabel += " [GPU]"
+		}
+		// Sprint 27 : le journal montre les entrees du job.
+		if len(job.AssetIDs) > 0 {
+			runtimeLabel += fmt.Sprintf(", %d asset(s)", len(job.AssetIDs))
 		}
 		dashLog("job_submit", fmt.Sprintf("job %s soumis par %s (%d taches, %s, %s)",
 			job.ID, org.Name, len(chunks), runtimeLabel, job.Command))

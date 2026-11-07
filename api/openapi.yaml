@@ -52,6 +52,15 @@ paths:
                 timeout_secs:
                   type: integer
                   example: 300
+                asset_ids:
+                  type: array
+                  items: { type: string }
+                  description: >
+                    Sprint 27 : identifiants des fichiers d'entree
+                    televersees via POST /v1/assets. Le noeud les pose
+                    dans /work du conteneur avant l'execution. Chaque
+                    asset doit appartenir a l'organisation.
+                  example: ["asset-0d0f1a34b5c6"]
       responses:
         "200":
           description: Job accepte et decoupe.
@@ -150,6 +159,53 @@ paths:
                   job_id: { type: string }
                   canceled: { type: integer }
         "401": { description: Cle API absente ou invalide. }
+
+  /v1/assets:
+    post:
+      operationId: uploadAsset
+      summary: Televerser un fichier d'entree (asset)
+      description: >
+        Sprint 27 : le corps de la requete est le fichier brut
+        (limite 100 Mo). Content-addressed : un contenu identique
+        renvoie le meme asset_id. Referencez l'asset dans asset_ids
+        a la soumission du job.
+      parameters:
+        - name: filename
+          in: query
+          required: false
+          schema: { type: string }
+          description: Nom de fichier d'origine (pose tel quel dans /work).
+        - name: zone
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: Asset enregistre.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  asset_id: { type: string }
+                  sha256: { type: string }
+                  size_bytes: { type: integer }
+                  zone: { type: string }
+        "401": { description: Cle API absente ou invalide. }
+
+  /v1/assets/{asset_id}/download:
+    get:
+      operationId: downloadAsset
+      summary: Telecharger son propre asset
+      parameters:
+        - name: asset_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Le fichier (octets bruts, X-Content-Sha256 a l'appui).
+        "404": { description: Asset inconnu ou possede par une autre organisation. }
 
 components:
   securitySchemes:

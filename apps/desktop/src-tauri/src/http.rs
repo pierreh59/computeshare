@@ -87,6 +87,35 @@ pub fn post_json_bearer(bearer: &str, url: &str, path: &str, body: &str) -> Opti
     request_bearer("POST", url, path, Some(body), Some(bearer))
 }
 
+/// Sprint 27 : telechargement BINAIRE d'un asset d'entree vers un
+/// fichier. Le corps n'est pas de l'UTF-8 fiable : on ne passe
+/// surtout PAS par into_string(). Timeout eleve (asset jusqu'a
+/// 100 Mo). Le corps n'est ecrit que si HTTP 200.
+pub fn get_file(url: &str, path: &str, dest: &std::path::Path) -> Option<Response> {
+    let full = full_url(url, path);
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(600))
+        .build();
+    let resp = match agent
+        .request("GET", &full)
+        .set("X-Node-Token", &node_token())
+        .call()
+    {
+        Ok(r) => r,
+        Err(ureq::Error::Status(_, r)) => r,
+        Err(_) => return None,
+    };
+    let status = resp.status();
+    if status == 200 {
+        let mut reader = resp.into_reader();
+        if let Ok(mut f) = std::fs::File::create(dest) {
+            let _ = std::io::copy(&mut reader, &mut f);
+        }
+    }
+    Some(Response { status, body: String::new() })
+}
+
 /// Sprint 26 : upload du fichier de resultat d'un chunk (octets bruts,
 /// en-tete X-Chunk-Id). Timeout dedie : un gros fichier (jusqu'a 5 Go)
 /// peut prendre longtemps a monter, on ne reutilise pas le timeout de

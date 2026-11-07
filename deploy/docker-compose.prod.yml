@@ -24,6 +24,9 @@ services:
       # Sprint 26 : fichiers de resultats rapatries, sur volume dedie
       # pour survivre aux rebuilds du conteneur.
       RESULTS_DIR: /data/results
+      # Sprint 27 : assets d'entree des jobs (meme volume /data,
+      # deja possede par l'utilisateur app depuis le fix du 7 nov.).
+      ASSETS_DIR: /data/assets
     volumes:
       - resultsdata:/data
     depends_on:
