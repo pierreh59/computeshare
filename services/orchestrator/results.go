@@ -39,7 +39,11 @@ func resultsDir() string {
 	if d == "" {
 		d = "results-data"
 	}
-	os.MkdirAll(d, 0o750)
+	// Fix 7 nov. 2026 : l'echec etait avale ; en prod le volume
+	// etait root:root et l'app (uid 1000) ne pouvait rien creer.
+	if err := os.MkdirAll(d, 0o750); err != nil {
+		log.Printf("results: creation de %s impossible : %v", d, err)
+	}
 	return d
 }
 
@@ -117,14 +121,19 @@ func uploadResult(c *Chunker, store *Store) http.HandlerFunc {
 		tmp := final + ".part"
 		f, err := os.Create(tmp)
 		if err != nil {
-			http.Error(w, "erreur ecriture", http.StatusInternalServerError)
+			// Fix 7 nov. 2026 : le detail remonte au noeud ET aux
+			// logs serveur (l'erreur muette "erreur ecriture" nous
+			// a coute un debug de plusieurs heures).
+			log.Printf("results: creation de %s impossible : %v", tmp, err)
+			http.Error(w, "erreur ecriture : "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		n, err := io.Copy(f, io.LimitReader(r.Body, maxResultBytes+1))
 		closeErr := f.Close()
 		if err != nil || closeErr != nil {
+			log.Printf("results: ecriture de %s impossible : copy=%v close=%v", tmp, err, closeErr)
 			os.Remove(tmp)
-			http.Error(w, "erreur ecriture", http.StatusInternalServerError)
+			http.Error(w, "erreur ecriture : "+fmt.Sprint(err, closeErr), http.StatusInternalServerError)
 			return
 		}
 		if n > maxResultBytes {
@@ -133,8 +142,9 @@ func uploadResult(c *Chunker, store *Store) http.HandlerFunc {
 			return
 		}
 		if err := os.Rename(tmp, final); err != nil {
+			log.Printf("results: renommage de %s vers %s impossible : %v", tmp, final, err)
 			os.Remove(tmp)
-			http.Error(w, "erreur ecriture", http.StatusInternalServerError)
+			http.Error(w, "erreur ecriture : "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		name := fileName
