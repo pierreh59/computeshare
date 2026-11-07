@@ -26,7 +26,7 @@ func TestDashLogSansStore(t *testing.T) {
 func TestOrgJobsSansBDD(t *testing.T) {
 	setDashStore(nil)
 	reg, chunker := newTestDash(t)
-	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a", true)
+	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a", true, false)
 	chunker.Submit(Job{ID: "job-m1", Command: "echo", TaskCount: 2}, "org-m")
 	chunker.Submit(Job{ID: "job-m2", Command: "echo", TaskCount: 1}, "org-m")
 	jobs := chunker.OrgJobs("org-m", 50)

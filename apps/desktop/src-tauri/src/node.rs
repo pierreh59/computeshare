@@ -27,6 +27,38 @@ fn wsl2_ready() -> bool {
     false
 }
 
+/// Sprint 25 : detection GPU pour les jobs conteneur avec "gpu": true.
+/// Probe `docker run --rm --gpus all alpine true` : reussie = le daemon
+/// peut passer le GPU au conteneur. Resultat MEMORISE (probe lente,
+/// une seule fois par session), re-declare au register suivant.
+#[cfg(windows)]
+fn gpu_ready() -> bool {
+    use std::os::windows::process::CommandExt;
+    use std::sync::atomic::{AtomicU8, Ordering};
+    // 0 = inconnu, 1 = pret, 2 = non pret.
+    static STATE: std::sync::OnceLock<AtomicU8> = std::sync::OnceLock::new();
+    let st = STATE.get_or_init(|| AtomicU8::new(0));
+    match st.load(Ordering::Relaxed) {
+        1 => return true,
+        2 => return false,
+        _ => {}
+    }
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let ok = std::process::Command::new("docker")
+        .args(["run", "--rm", "--gpus", "all", "alpine", "true"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    st.store(if ok { 1 } else { 2 }, Ordering::Relaxed);
+    ok
+}
+
+#[cfg(not(windows))]
+fn gpu_ready() -> bool {
+    false
+}
+
 #[derive(Serialize, Clone)]
 pub struct NodeStatus {
     pub running: bool,
@@ -92,14 +124,8 @@ fn node_loop(gateway: String, node_id: String) {
         std::env::var("COMPUTERNAME").unwrap_or_default(),
         hw.as_ref().map(|h| h.cpu_model.clone()).unwrap_or_default()
     );
-    let register_body = serde_json::json!({
-        "node_id": node_id,
-        "gpu_model": hw.as_ref().map(|h| h.gpu_model.clone()).unwrap_or_default(),
-        "gpu_category": hw.as_ref().map(|h| h.gpu_category.clone()).unwrap_or_default(),
-        "machine_fingerprint": machine_fingerprint,
-        "wsl2_ready": wsl2_ready(),
-    })
-    .to_string();
+    let gpu_model = hw.as_ref().map(|h| h.gpu_model.clone()).unwrap_or_default();
+    let gpu_category = hw.as_ref().map(|h| h.gpu_category.clone()).unwrap_or_default();
 
     // Sprint 22 : le register (heartbeat) tourne dans SON PROPRE thread.
     // Avant, la boucle etait bloquee pendant l'execution d'un chunk : un
@@ -108,9 +134,22 @@ fn node_loop(gateway: String, node_id: String) {
     // a un autre noeud (vu en vrai le 7 nov., job-gros-1).
     {
         let gw = gateway.clone();
-        let body = register_body.clone();
-        std::thread::spawn(move || loop {
+        let nid = node_id.clone();
+        std::thread::spawn(move || {
+            let wsl2 = wsl2_ready(); // detection lente : une seule fois
+            loop {
             // Register : idempotent, met a jour LastSeen = heartbeat.
+            // Sprint 25 : "gpu_ready" re-evalue a chaque register (la
+            // probe peut reussir apres le lancement de Docker Desktop).
+            let body = serde_json::json!({
+                "node_id": nid,
+                "gpu_model": gpu_model,
+                "gpu_category": gpu_category,
+                "machine_fingerprint": machine_fingerprint,
+                "wsl2_ready": wsl2,
+                "gpu_ready": gpu_ready(),
+            })
+            .to_string();
             match crate::http::post_json(&gw, "/register", &body) {
                 Some(r) if r.status == 200 => {
                     // Un register reussi efface l'erreur precedente : sans
@@ -125,6 +164,7 @@ fn node_loop(gateway: String, node_id: String) {
                 None => set_error("gateway injoignable"),
             }
             std::thread::sleep(Duration::from_secs(5));
+            }
         });
     }
 
@@ -201,7 +241,10 @@ fn run_chunk_gateway(gateway: &str, chunk: &serde_json::Value) -> crate::sandbox
     let runtime = chunk["runtime"].as_str().unwrap_or_default().to_string();
     let image = chunk["image"].as_str().unwrap_or_default().to_string();
     if runtime == "container" {
-        crate::container::run_container_chunk(&spec, &image)
+        // Sprint 25 : le job peut demander le GPU ("gpu": true) - le
+        // conteneur est alors lance avec --gpus all (toujours durci).
+        let gpu = chunk["gpu"].as_bool().unwrap_or(false);
+        crate::container::run_container_chunk(&spec, &image, gpu)
     } else {
         crate::sandbox::run_chunk(spec)
     }

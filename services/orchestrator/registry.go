@@ -9,16 +9,16 @@ import (
 
 // Node represente un noeud enregistre avec sa derniere presence.
 type Node struct {
-	ID          string    `json:"id"`
-	UserID      string    `json:"-"` // compte vendeur proprietaire (Sprint 15)
-	GPUModel    string    `json:"gpu_model"`
-	GPUCategory string    `json:"gpu_category"`
-	Zone        string    `json:"zone"`
+	ID                 string    `json:"id"`
+	UserID             string    `json:"-"` // compte vendeur proprietaire (Sprint 15)
+	GPUModel           string    `json:"gpu_model"`
+	GPUCategory        string    `json:"gpu_category"`
+	Zone               string    `json:"zone"`
 	TrustScore         float64   `json:"trust_score"`
 	Status             string    `json:"status"`
 	MachineFingerprint string    `json:"machine_fingerprint,omitempty"`
-	LastSeen    time.Time `json:"last_seen"`
-	Online      bool      `json:"online"`
+	LastSeen           time.Time `json:"last_seen"`
+	Online             bool      `json:"online"`
 	// Sprint 17 : IP d'origine (X-Forwarded-For) pour la geolocalisation
 	// du dashboard admin. En memoire uniquement (jamais persistee).
 	IP string `json:"-"`
@@ -26,6 +26,11 @@ type Node struct {
 	// conteneur (WSL2 + virtualisation detectes par l'app desktop).
 	// Memoire uniquement : re-declare a chaque register (toutes les 5 s).
 	WSL2Ready bool `json:"wsl2_ready"`
+	// Sprint 25 : le noeud annonce si Docker peut lui passer le GPU
+	// (probe `docker run --gpus all` reussie, memorisee par l'app
+	// desktop). Les jobs avec "gpu": true ne partent QUE vers ces
+	// noeuds. Memoire uniquement : re-declare a chaque register.
+	GpuReady bool `json:"gpu_ready"`
 }
 
 // Registry : map protegee par mutex, avec purge des noeuds silencieux.
@@ -48,7 +53,7 @@ func NewRegistry(store *Store, fraud *Fraud) *Registry {
 // Register ajoute ou rafraichit un noeud (idempotent).
 // LAI-44 : une empreinte machine deja vue sous un autre node_id
 // declenche une alerte Sybil et une penalite de confiance.
-func (r *Registry) Register(id, gpuModel, gpuCategory, zone, fingerprint string, wsl2Ready bool) *Node {
+func (r *Registry) Register(id, gpuModel, gpuCategory, zone, fingerprint string, wsl2Ready, gpuReady bool) *Node {
 	if zone == "" {
 		zone = "local"
 	}
@@ -64,6 +69,7 @@ func (r *Registry) Register(id, gpuModel, gpuCategory, zone, fingerprint string,
 	n.Zone = zone
 	n.LastSeen = time.Now()
 	n.WSL2Ready = wsl2Ready
+	n.GpuReady = gpuReady
 	// Sprint 17 : un noeud bloque par l'admin reste hors ligne,
 	// meme s'il continue d'appeler /register.
 	if n.Status != "banned" {

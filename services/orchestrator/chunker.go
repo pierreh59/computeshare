@@ -33,6 +33,11 @@ type Job struct {
 	// registre Docker passee par Image).
 	Runtime string `json:"runtime,omitempty"`
 	Image   string `json:"image,omitempty"`
+	// Sprint 25 : "gpu": true => le job DOIT tourner sur un noeud
+	// "GPU pret" (probe docker --gpus reussie) et le conteneur est
+	// lance avec --gpus all. Le tarif gele est alors le tarif GPU,
+	// sinon le tarif CPU (beaucoup moins cher).
+	Gpu bool `json:"gpu,omitempty"`
 }
 
 // Chunk : une unite de travail assignee a un seul noeud.
@@ -60,6 +65,9 @@ type Chunk struct {
 	// Sprint 18 (v2) : heritage du runtime conteneur du job.
 	Runtime string `json:"runtime,omitempty"`
 	Image   string `json:"image,omitempty"`
+	// Sprint 25 : heritage du flag GPU du job (routage + --gpus all
+	// cote desktop + choix du tarif CPU/GPU a la livraison).
+	Gpu bool `json:"gpu,omitempty"`
 	// LAI-51 : tarif gele a la livraison (EUR / GPU-heure).
 	PriceEurPerHour float64 `json:"price_eur_per_hour,omitempty"`
 	// Paiement calcule a la completion (EUR).
@@ -135,6 +143,20 @@ func (c *Chunker) Submit(job Job, orgID string) []*Chunk {
 		}
 		nodes = ready
 	}
+	// Sprint 25 : un job GPU ne part QUE vers les noeuds qui ont
+	// annonce gpu_ready (probe `docker run --gpus all` reussie).
+	if job.Gpu {
+		ready := make([]Node, 0, len(nodes))
+		for _, n := range nodes {
+			if n.GpuReady {
+				ready = append(ready, n)
+			}
+		}
+		if len(ready) == 0 {
+			return nil
+		}
+		nodes = ready
+	}
 	if len(nodes) == 0 {
 		return nil
 	}
@@ -158,6 +180,7 @@ func (c *Chunker) Submit(job Job, orgID string) []*Chunk {
 			AssetIDs:       job.AssetIDs,
 			Runtime:        job.Runtime,
 			Image:          job.Image,
+			Gpu:            job.Gpu,
 		}
 		c.chunks = append(c.chunks, ch)
 		out = append(out, ch)
@@ -168,6 +191,8 @@ func (c *Chunker) Submit(job Job, orgID string) []*Chunk {
 
 // NextFor livre le prochain chunk en attente a un noeud, le passe a
 // "running" et GELE son tarif au tarif courant de la categorie (ADR-006).
+// Sprint 25 : le tarif gele depend du job - tarif GPU si le job demande
+// le GPU, tarif CPU (moins cher) sinon. Jamais retroactif.
 func (c *Chunker) NextFor(nodeID string) *Chunk {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -176,7 +201,11 @@ func (c *Chunker) NextFor(nodeID string) *Chunk {
 			ch.Status = "running"
 			ch.Attempts++
 			ch.StartedAt = time.Now()
-			ch.PriceEurPerHour = c.pricing.CurrentPrice(c.nodeCategory(nodeID))
+			if ch.Gpu {
+				ch.PriceEurPerHour = c.pricing.CurrentPrice(c.nodeCategory(nodeID))
+			} else {
+				ch.PriceEurPerHour = c.pricing.CurrentCPUPrice(c.nodeCategory(nodeID))
+			}
 			c.store.SaveChunk(ch)
 			return ch
 		}
@@ -282,10 +311,14 @@ func (c *Chunker) rescheduleLoop() {
 
 // pickNode choisit un nouveau noeud pour un chunk, en privilegiant
 // la meme zone (data-locality, LAI-28). Sprint 18 : un chunk conteneur
-// n'est jamais re-confie a un noeud sans WSL2.
+// n'est jamais re-confie a un noeud sans WSL2. Sprint 25 : un chunk
+// GPU n'est jamais re-confie a un noeud sans gpu_ready.
 func pickNode(online []Node, ch *Chunk) string {
 	for _, n := range online {
 		if ch.Runtime == "container" && !n.WSL2Ready {
+			continue
+		}
+		if ch.Gpu && !n.GpuReady {
 			continue
 		}
 		if n.ID != ch.NodeID && n.Zone == ch.Zone {
@@ -294,6 +327,9 @@ func pickNode(online []Node, ch *Chunk) string {
 	}
 	for _, n := range online {
 		if ch.Runtime == "container" && !n.WSL2Ready {
+			continue
+		}
+		if ch.Gpu && !n.GpuReady {
 			continue
 		}
 		if n.ID != ch.NodeID {

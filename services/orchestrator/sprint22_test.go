@@ -10,8 +10,8 @@ import (
 // pas au noeud theoriquement assigne.
 func TestCompleteIdempotentEtPayeLeRapporteur(t *testing.T) {
 	reg, chunker := newTestDash(t)
-	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a", false)
-	reg.Register("node-b", "GPU B", "prosumer", "europe", "fp-b", false)
+	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a", false, false)
+	reg.Register("node-b", "GPU B", "prosumer", "europe", "fp-b", false, false)
 
 	job := Job{ID: "job-s22-a", Command: "echo", TaskCount: 1, Zone: "europe"}
 	if chunker.Submit(job, "") == nil {
@@ -55,8 +55,8 @@ func TestCompleteIdempotentEtPayeLeRapporteur(t *testing.T) {
 // pas expire ne doit PAS etre re-attribue.
 func TestRescheduleAttendLeTimeout(t *testing.T) {
 	reg, chunker := newTestDash(t)
-	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a", false)
-	reg.Register("node-b", "GPU B", "prosumer", "europe", "fp-b", false)
+	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a", false, false)
+	reg.Register("node-b", "GPU B", "prosumer", "europe", "fp-b", false, false)
 
 	job := Job{ID: "job-s22-b", Command: "echo", TaskCount: 1,
 		Zone: "europe", TimeoutSec: 600}

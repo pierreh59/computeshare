@@ -31,7 +31,7 @@ pub(crate) fn image_valide(image: &str) -> bool {
 /// (Docker Desktop). Le dossier sandbox Windows est monte directement
 /// sur /work (Docker Desktop accepte les chemins Windows en /).
 #[cfg(windows)]
-pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str) -> ChunkResult {
+pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str, gpu: bool) -> ChunkResult {
     use std::os::windows::process::CommandExt;
     use std::process::{Command, Stdio};
 
@@ -132,6 +132,14 @@ pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str) -> ChunkResult 
             "-w",
             "/work",
         ])
+        // Sprint 25 : le GPU n'est expose QUE si le job le demande
+        // ("gpu": true). Les jobs CPU restent sans GPU (et factures au
+        // tarif CPU). Tous les garde-fous du sprint 20 sont conserves.
+        // NB : le drapeau doit preceder le nom de l'image.
+        if gpu {
+            builder.args(["--gpus", "all"]);
+        }
+        builder
         .arg(image)
         .arg(&spec.command)
         .args(&spec.args);
@@ -191,7 +199,7 @@ pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str) -> ChunkResult 
 }
 
 #[cfg(not(windows))]
-pub(crate) fn run_container_chunk(_spec: &ChunkSpec, _image: &str) -> ChunkResult {
+pub(crate) fn run_container_chunk(_spec: &ChunkSpec, _image: &str, _gpu: bool) -> ChunkResult {
     ChunkResult {
         chunk_id: _spec.chunk_id.clone(),
         outcome: "rejected".into(),

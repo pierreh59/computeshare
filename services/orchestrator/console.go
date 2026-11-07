@@ -48,7 +48,8 @@ const consoleHTML = `<!DOCTYPE html>
  <label>Nombre de taches</label><input id="count" value="4">
  <label>Nom du fichier resultat (ex: out.mp4)</label><input id="outname" value="out.mp4">
  <label>Duree estimee par tache (heures GPU, pour la simulation de cout)</label><input id="hours" value="1">
- <label>Categorie GPU estimee (consumer / prosumer / high_end)</label><input id="cat" value="prosumer">
+ <label>Categorie du noeud (consumer / prosumer / high_end)</label><input id="cat" value="prosumer">
+ <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="gpucheck" style="width:auto"> Job GPU (reserve aux noeuds equipes d'un GPU, facture au tarif GPU)</label>
  <button onclick="estimate()">Simuler le cout</button>
  <button class="gray" onclick="submitJob()">Soumettre</button>
  <div id="est"></div>
@@ -74,6 +75,7 @@ const consoleHTML = `<!DOCTYPE html>
 
 <script>
 var poll=null, prices={consumer:0.15,prosumer:0.25,high_end:0.35},
+    cpuPrices={consumer:0.02,prosumer:0.03,high_end:0.04},
     MARGIN=1.30, VAT=0.20, AWS=1.00;
 function log(m,cls){var d=document.createElement('div');d.innerHTML='<span class="muted">'+new Date().toLocaleTimeString()+'</span> '+m;d.className=cls||'';document.getElementById('log').prepend(d);}
 function api(path,opts){opts=opts||{};opts.headers=Object.assign({'Content-Type':'application/json','Authorization':'Bearer '+key()},opts.headers||{});return fetch(path,opts).then(function(r){return r.text().then(function(t){var j;try{j=JSON.parse(t);}catch(e){j=null;}if(!r.ok)throw new Error((j&&j.error)||t||('HTTP '+r.status));return j;});});}
@@ -81,7 +83,9 @@ function key(){return document.getElementById('key').value.trim();}
 function estimate(){
   var h=parseFloat(document.getElementById('hours').value)||0,
       c=parseInt(document.getElementById('count').value)||0,
-      p=prices[document.getElementById('cat').value]||0.25,
+      gpu=document.getElementById('gpucheck').checked,
+      cat=document.getElementById('cat').value,
+      p=gpu?(prices[cat]||0.25):(cpuPrices[cat]||0.03),
       ours=p*MARGIN*h*c, aws=AWS*h*c;
   document.getElementById('est').innerHTML =
    '<table><tr><th></th><th>ComputeShare</th><th>AWS equivalent</th></tr>'+
@@ -89,11 +93,12 @@ function estimate(){
    '<tr><td>TVA 20%</td><td>'+(ours*VAT).toFixed(2)+' EUR</td><td>'+(aws*VAT).toFixed(2)+' EUR</td></tr>'+
    '<tr><td>Total TTC</td><td>'+(ours*(1+VAT)).toFixed(2)+' EUR</td><td>'+(aws*(1+VAT)).toFixed(2)+' EUR</td></tr></table>'+
    '<p class="ok">Economie estimee vs AWS : '+((1-ours/aws)*100).toFixed(0)+' %</p>';
-  log('Simulation : '+c+' taches x '+h+' h en '+document.getElementById('cat').value);
+  log('Simulation : '+c+' taches x '+h+' h en '+cat+(gpu?' (tarif GPU)':' (tarif CPU)'));
 }
 function submitJob(){
   var body={id:jid(),command:cmd_(),args:document.getElementById('args').value.split(' ').filter(Boolean),
    task_count:parseInt(document.getElementById('count').value)||1,timeout_secs:600,
+   gpu:document.getElementById('gpucheck').checked,
    output_name:document.getElementById('outname').value.trim()};
   api('/v1/jobs',{method:'POST',body:JSON.stringify(body)}).then(function(r){
     log('Job <b>'+r.job_id+'</b> soumis ('+r.task_count+' taches).','ok');

@@ -10,8 +10,8 @@ func TestContainerJobOnlyToReadyNodes(t *testing.T) {
 	reg, chunker := newTestDash(t)
 
 	// node-a : WSL2 OK ; node-b : pas de conteneur.
-	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a", true)
-	reg.Register("node-b", "GPU B", "prosumer", "europe", "fp-b", false)
+	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a", true, false)
+	reg.Register("node-b", "GPU B", "prosumer", "europe", "fp-b", false, false)
 
 	job := Job{
 		ID: "job-ctr-1", Command: "python", TaskCount: 6, Zone: "europe",
@@ -33,15 +33,15 @@ func TestContainerJobOnlyToReadyNodes(t *testing.T) {
 
 	// Un job conteneur sans aucun noeud pret est refuse.
 	reg2, chunker2 := newTestDash(t)
-	reg2.Register("node-c", "GPU C", "prosumer", "europe", "fp-c", false)
+	reg2.Register("node-c", "GPU C", "prosumer", "europe", "fp-c", false, false)
 	if chunker2.Submit(job, "") != nil {
 		t.Fatal("aucun noeud pret : la soumission conteneur doit echouer")
 	}
 
 	// Un job allowlist part toujours vers tous les noeuds.
 	reg3, chunker3 := newTestDash(t)
-	reg3.Register("node-d", "GPU D", "prosumer", "europe", "fp-d", false)
-	reg3.Register("node-e", "GPU E", "prosumer", "europe", "fp-e", false)
+	reg3.Register("node-d", "GPU D", "prosumer", "europe", "fp-d", false, false)
+	reg3.Register("node-e", "GPU E", "prosumer", "europe", "fp-e", false, false)
 	jobV1 := Job{ID: "job-v1-1", Command: "echo", TaskCount: 2, Zone: "europe"}
 	out := chunker3.Submit(jobV1, "")
 	if out == nil || len(out) != 2 {

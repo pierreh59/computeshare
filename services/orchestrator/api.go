@@ -56,7 +56,9 @@ func v1Submit(orgs *OrgStore, c *Chunker, b *Billing) http.HandlerFunc {
 		}
 		chunks := c.Submit(job, org.ID)
 		if chunks == nil {
-			if job.Runtime == "container" {
+			if job.Gpu {
+				http.Error(w, "no gpu-capable node available", http.StatusServiceUnavailable)
+			} else if job.Runtime == "container" {
 				http.Error(w, "no container-capable node available", http.StatusServiceUnavailable)
 			} else {
 				http.Error(w, "no node available", http.StatusServiceUnavailable)
@@ -66,6 +68,9 @@ func v1Submit(orgs *OrgStore, c *Chunker, b *Billing) http.HandlerFunc {
 		runtimeLabel := job.Runtime
 		if runtimeLabel == "container" {
 			runtimeLabel = "conteneur " + job.Image
+		}
+		if job.Gpu {
+			runtimeLabel += " [GPU]"
 		}
 		dashLog("job_submit", fmt.Sprintf("job %s soumis par %s (%d taches, %s, %s)",
 			job.ID, org.Name, len(chunks), runtimeLabel, job.Command))

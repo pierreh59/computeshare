@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -21,6 +22,19 @@ var FLOORS = map[string]float64{
 	"consumer": 0.12,
 	"prosumer": 0.20,
 	"high_end": 0.30,
+}
+
+// Sprint 25 - Tarifs CPU separes (EUR / heure de conteneur 2 vCPU).
+// Le GPU dans le conteneur n'etait pas expose avant ce sprint : un
+// job CPU etait facture au tarif GPU (incoherence). Un job sans
+// "gpu": true est maintenant facture au tarif CPU, beaucoup moins
+// cher, calibre sur le marche (Salad 0,009 EUR/h pour 2 vCPU en
+// prix client, AWS t3.medium 0,039 EUR/h ; nous nous positionnons
+// entre les deux, sous AWS).
+var CPU_FLOORS = map[string]float64{
+	"consumer": 0.015,
+	"prosumer": 0.02,
+	"high_end": 0.03,
 }
 
 // Garde-fou churn : baisse de plus de 20 % sur 24 h = alerte.
@@ -41,11 +55,12 @@ type Alert struct {
 }
 
 type Pricing struct {
-	mu      sync.RWMutex
-	current map[string]float64
-	history []PriceChange
-	alerts  []Alert
-	store   *Store
+	mu         sync.RWMutex
+	current    map[string]float64
+	cpuCurrent map[string]float64
+	history    []PriceChange
+	alerts     []Alert
+	store      *Store
 }
 
 func NewPricing(store *Store) *Pricing {
@@ -55,21 +70,39 @@ func NewPricing(store *Store) *Pricing {
 			"prosumer": 0.25,
 			"high_end": 0.35,
 		},
+		// Sprint 25 : tarifs CPU (payout fournisseur, EUR/h).
+		cpuCurrent: map[string]float64{
+			"consumer": 0.02,
+			"prosumer": 0.03,
+			"high_end": 0.04,
+		},
 		store: store,
 	}
 }
 
-// CurrentPrice renvoie le tarif courant d'une categorie (0 si inconnue).
+// CurrentPrice renvoie le tarif GPU courant d'une categorie (0 si inconnue).
 func (p *Pricing) CurrentPrice(category string) float64 {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.current[category]
 }
 
+// Sprint 25 : tarif CPU courant d'une categorie (0 si inconnue).
+func (p *Pricing) CurrentCPUPrice(category string) float64 {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.cpuCurrent[category]
+}
+
 // Restore recharge un tarif depuis la BDD au demarrage.
+// Sprint 25 : les categories prefixees "cpu:" designent les tarifs CPU.
 func (p *Pricing) Restore(category string, eurPerHour float64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if strings.HasPrefix(category, "cpu:") {
+		p.cpuCurrent[strings.TrimPrefix(category, "cpu:")] = eurPerHour
+		return
+	}
 	p.current[category] = eurPerHour
 }
 
@@ -79,6 +112,17 @@ func (p *Pricing) Snapshot() map[string]float64 {
 	defer p.mu.RUnlock()
 	out := make(map[string]float64, len(p.current))
 	for k, v := range p.current {
+		out[k] = v
+	}
+	return out
+}
+
+// Sprint 25 : snapshot des tarifs CPU (pour l'admin).
+func (p *Pricing) SnapshotCPU() map[string]float64 {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	out := make(map[string]float64, len(p.cpuCurrent))
+	for k, v := range p.cpuCurrent {
 		out[k] = v
 	}
 	return out
@@ -146,6 +190,30 @@ func (p *Pricing) addChurnAlertLocked(category string, eurPerHour float64) {
 			category, ref, eurPerHour, (ref-eurPerHour)/ref*100)
 		p.alerts = append(p.alerts, Alert{Type: "churn", Msg: msg, At: time.Now()})
 	}
+}
+
+// SetCPUPrice (Sprint 25) applique un nouveau tarif CPU, sous reserve
+// du plancher anti-churn CPU. Persiste avec le prefixe "cpu:".
+func (p *Pricing) SetCPUPrice(category string, eurPerHour float64) error {
+	floor, ok := CPU_FLOORS[category]
+	if !ok {
+		return fmt.Errorf("categorie inconnue: %s", category)
+	}
+	if eurPerHour < floor {
+		return fmt.Errorf("sous le plancher anti-churn CPU (%.3f EUR/h)", floor)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	old := p.cpuCurrent[category]
+	p.cpuCurrent[category] = eurPerHour
+	p.store.SavePriceChange("cpu:"+category, eurPerHour)
+	if old > 0 && eurPerHour < old*(1-churnDropThreshold) {
+		msg := fmt.Sprintf(
+			"churn: cpu %s passe de %.3f a %.3f EUR/h (-%.0f%%)",
+			category, old, eurPerHour, (old-eurPerHour)/old*100)
+		p.alerts = append(p.alerts, Alert{Type: "churn", Msg: msg, At: time.Now()})
+	}
+	return nil
 }
 
 // requireAdmin : cle simple via l'en-tete X-Admin-Key (MVP ;

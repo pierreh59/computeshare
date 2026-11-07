@@ -19,6 +19,7 @@ type Message struct {
 	Intensity          float64 `json:"intensity,omitempty"`
 	MachineFingerprint string  `json:"machine_fingerprint,omitempty"`
 	WSL2Ready          bool    `json:"wsl2_ready,omitempty"`
+	GpuReady           bool    `json:"gpu_ready,omitempty"`
 }
 
 var upgrader = websocket.Upgrader{
@@ -68,7 +69,7 @@ func nodeWS(reg *Registry, hub *Hub, w http.ResponseWriter, r *http.Request) {
 			// pour la detection anti-Sybil.
 			etaitEnLigne := reg.IsOnline(msg.NodeID)
 			n := reg.Register(msg.NodeID, msg.GPUModel, msg.GPUCategory,
-				msg.Zone, msg.MachineFingerprint, msg.WSL2Ready)
+				msg.Zone, msg.MachineFingerprint, msg.WSL2Ready, msg.GpuReady)
 			reg.SetNodeIP(msg.NodeID, clientIP(r))
 			log.Printf("node registered: %s (%s/%s, zone %s, trust %.0f)",
 				n.ID, n.GPUModel, n.GPUCategory, n.Zone, n.TrustScore)

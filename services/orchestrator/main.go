@@ -12,7 +12,7 @@ import (
 
 // orchestratorVersion : version de l'orchestrateur, affichee sur le
 // dashboard admin et dans /healthz. A incrementer a chaque sprint.
-const orchestratorVersion = "v0.19.2"
+const orchestratorVersion = "v0.20.0"
 
 func main() {
 	port := os.Getenv("PORT")
@@ -90,6 +90,7 @@ func main() {
 			Zone               string `json:"zone"`
 			MachineFingerprint string `json:"machine_fingerprint"`
 			WSL2Ready          bool   `json:"wsl2_ready"`
+			GpuReady           bool   `json:"gpu_ready"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&msg); err != nil || msg.NodeID == "" {
 			http.Error(w, "invalid register", http.StatusBadRequest)
@@ -97,7 +98,7 @@ func main() {
 		}
 		etaitEnLigne := registry.IsOnline(msg.NodeID)
 		writeJSON(w, registry.Register(msg.NodeID, msg.GPUModel,
-			msg.GPUCategory, msg.Zone, msg.MachineFingerprint, msg.WSL2Ready))
+			msg.GPUCategory, msg.Zone, msg.MachineFingerprint, msg.WSL2Ready, msg.GpuReady))
 		registry.SetNodeIP(msg.NodeID, clientIP(r))
 		if !etaitEnLigne {
 			if registry.IsOnline(msg.NodeID) {
@@ -132,23 +133,38 @@ func main() {
 		switch r.Method {
 		case "GET":
 			writeJSON(w, map[string]interface{}{
-				"current": pricing.Snapshot(),
-				"floors":  FLOORS,
+				"current":     pricing.Snapshot(),
+				"floors":      FLOORS,
+				"cpu_current": pricing.SnapshotCPU(),
+				"cpu_floors":  CPU_FLOORS,
 			})
 		case "POST":
 			var req struct {
 				Category   string  `json:"category"`
 				EurPerHour float64 `json:"eur_per_hour"`
+				// Sprint 25 : "cpu" pour un tarif CPU, vide (ou "gpu")
+				// pour un tarif GPU (defaut, compatibilite admin).
+				Kind string `json:"kind"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				http.Error(w, "invalid", http.StatusBadRequest)
 				return
 			}
-			if err := pricing.SetPrice(req.Category, req.EurPerHour); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
+			if req.Kind == "cpu" {
+				if err := pricing.SetCPUPrice(req.Category, req.EurPerHour); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+			} else {
+				if err := pricing.SetPrice(req.Category, req.EurPerHour); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
 			}
-			writeJSON(w, pricing.Snapshot())
+			writeJSON(w, map[string]interface{}{
+				"current":     pricing.Snapshot(),
+				"cpu_current": pricing.SnapshotCPU(),
+			})
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}

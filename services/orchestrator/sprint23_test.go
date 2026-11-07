@@ -10,7 +10,7 @@ import (
 // avec les comptages par statut, et respecte la limite.
 func TestOrgJobsParOrganisation(t *testing.T) {
 	reg, chunker := newTestDash(t)
-	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a", true)
+	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a", true, false)
 
 	chunker.Submit(Job{ID: "job-a1", Command: "echo", TaskCount: 2}, "org-a")
 	chunker.Submit(Job{ID: "job-a2", Command: "echo", TaskCount: 1}, "org-a")
@@ -47,7 +47,7 @@ func TestOrgJobsParOrganisation(t *testing.T) {
 // statut global et cout, et ne fuit jamais les jobs d'une autre org.
 func TestV1JobsListEndpoint(t *testing.T) {
 	reg, chunker := newTestDash(t)
-	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a", true)
+	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a", true, false)
 
 	store := NewStore()
 	orgs := NewOrgStore(store)

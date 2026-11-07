@@ -193,7 +193,6 @@ func TestRotationJetonVendeur(t *testing.T) {
 
 var _ = bytes.MinRead
 
-
 // Sprint 15c : sans consentement explicite, l'inscription est refusee.
 func TestSignupExigeConsentement(t *testing.T) {
 	a, _ := newTestAccounts(t)
@@ -361,7 +360,7 @@ func TestSuppressionCompteRGPD(t *testing.T) {
 	uid := resp["user"].(map[string]interface{})["id"].(string)
 
 	// Machine liee au compte.
-	reg.Register("node-del1", "Test GPU", "mid", "eu", "", false)
+	reg.Register("node-del1", "Test GPU", "mid", "eu", "", false, false)
 	reg.BindSeller("node-del1", uid)
 	if len(reg.NodesOfUser(uid)) != 1 {
 		t.Fatal("machine liee attendue")
@@ -427,7 +426,6 @@ func TestThrottleLogin(t *testing.T) {
 		t.Errorf("6e tentative: attendu 429, eu %d", rec.Code)
 	}
 }
-
 
 // Sprint 15d (LAI-61) : comptes particulier vs societe.
 
