@@ -15,21 +15,72 @@ import "net/http"
 // CSS commun aux pages de comptes.
 const accountsCSS = `
 <style>
- body{font-family:Segoe UI,system-ui,sans-serif;max-width:860px;margin:24px auto;padding:0 16px;background:#0f172a;color:#e2e8f0}
- h1{font-size:22px} h2{font-size:16px;margin-top:28px;color:#7dd3fc}
- .card{background:#1e293b;border-radius:12px;padding:16px;margin-top:12px}
- label{display:block;margin-top:10px;font-size:13px;color:#94a3b8}
- input{width:100%;padding:8px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;box-sizing:border-box}
- button{margin-top:14px;padding:10px 18px;border:0;border-radius:8px;background:#22c55e;color:#04220f;font-weight:600;cursor:pointer}
- button.gray{background:#475569;color:#e2e8f0}
- button.blue{background:#0ea5e9;color:#04222e}
- table{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}
- td,th{padding:6px 8px;border-bottom:1px solid #334155;text-align:left}
- .ok{color:#4ade80}.err{color:#f87171}.muted{color:#94a3b8}
- .rolebtn{display:inline-block;padding:8px 16px;border:1px solid #334155;border-radius:8px;margin-right:8px;cursor:pointer;font-size:14px}
- .rolebtn.sel{background:#0ea5e9;color:#04222e;font-weight:600;border-color:#0ea5e9}
- code{background:#0f172a;padding:2px 6px;border-radius:6px;font-size:13px;word-break:break-all}
- a{color:#7dd3fc}
+ :root{
+  --bg1:#0b1224; --bg2:#0d1730; --card:#141c33; --card2:#182242;
+  --line:#243056; --txt:#e6ebf5; --muted:#8b98b8;
+  --acc:#818cf8; --cyan:#22d3ee; --green:#34d399; --amber:#fbbf24; --red:#f87171;
+ }
+ *{box-sizing:border-box}
+ body{
+  font-family:"Segoe UI Variable","Segoe UI",system-ui,sans-serif;
+  background:radial-gradient(1200px 700px at 85% -10%, #1b2a55 0%, transparent 55%),
+             linear-gradient(160deg,var(--bg1),var(--bg2) 60%,#0e1a38);
+  background-attachment:fixed;color:var(--txt);margin:0;padding:0 0 60px;min-height:100vh;
+ }
+ .wrap{max-width:920px;margin:0 auto;padding:26px 20px}
+ /* entete */
+ .top{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+ .brand{display:flex;align-items:center;gap:12px}
+ .logo{width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;
+  background:linear-gradient(135deg,#22d3ee55,var(--acc));border:1px solid #2c3c6e;box-shadow:0 6px 18px #818cf833}
+ h1{font-size:21px;margin:0}
+ .sub{font-size:12px;color:var(--muted);letter-spacing:.05em}
+ /* cartes */
+ h2{font-size:13px;margin:0 0 4px;color:var(--cyan);text-transform:uppercase;letter-spacing:.1em}
+ .card{background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--line);
+  border-radius:16px;padding:18px 20px;margin-top:14px;box-shadow:0 8px 24px rgba(2,6,20,.35)}
+ .card:hover{border-color:#2c3c6e}
+ label{display:block;margin-top:12px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+ input,select{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line);
+  background:#0d1428;color:var(--txt);outline:none;transition:border-color .15s, box-shadow .15s}
+ input:focus,select:focus{border-color:var(--acc);box-shadow:0 0 0 3px #818cf833}
+ button{margin-top:14px;padding:10px 20px;border:0;border-radius:10px;cursor:pointer;font-weight:600;font-size:14px;
+  background:linear-gradient(135deg,var(--acc),#6366f1);color:#fff;box-shadow:0 6px 16px #6366f144;transition:transform .1s, box-shadow .15s}
+ button:hover{transform:translateY(-1px);box-shadow:0 8px 20px #6366f166}
+ button:active{transform:translateY(0)}
+ button.gray{background:#1a2444;color:var(--txt);border:1px solid var(--line);box-shadow:none;padding:8px 14px;font-size:13px}
+ button.blue{background:linear-gradient(135deg,#06b6d4,#0891b2);color:#03212b}
+ button.danger{background:linear-gradient(135deg,#ef4444,#b91c1c);color:#fff}
+ table{width:100%;border-collapse:collapse;font-size:14px;margin-top:10px}
+ td,th{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left}
+ th{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+ td{font-variant-numeric:tabular-nums}
+ .ok{color:var(--green)}.err{color:var(--red)}.muted{color:var(--muted)}
+ .rolebtn{display:inline-block;padding:8px 16px;border:1px solid var(--line);border-radius:10px;margin-right:8px;cursor:pointer;font-size:14px}
+ .rolebtn.sel{background:linear-gradient(135deg,var(--acc),#6366f1);color:#fff;font-weight:600;border-color:transparent}
+ code{background:#0d1428;border:1px solid var(--line);padding:2px 6px;border-radius:6px;font-size:13px;word-break:break-all}
+ a{color:var(--cyan);text-decoration:none}
+ a:hover{text-decoration:underline}
+ /* tuiles stats */
+ .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+ .tile{background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:16px;padding:14px 16px}
+ .tile-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+ .tile-value{font-size:22px;font-weight:700;margin-top:6px;font-variant-numeric:tabular-nums}
+ .tile-value.money{color:var(--green)}
+ /* badges statut */
+ .chip{display:inline-block;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600;letter-spacing:.02em}
+ .chip.run{background:#22d3ee22;color:var(--cyan);border:1px solid #22d3ee55}
+ .chip.done{background:#34d39922;color:var(--green);border:1px solid #34d39955}
+ .chip.fail{background:#f8717122;color:var(--red);border:1px solid #f8717155}
+ /* barre de progression jobs */
+ .pbar{background:#0d1428;border:1px solid var(--line);border-radius:99px;height:10px;overflow:hidden;margin-top:8px}
+ .pbar>div{background:linear-gradient(90deg,var(--acc),var(--cyan));height:100%;width:0;transition:width .5s;border-radius:99px}
+ .pbar.full>div{background:linear-gradient(90deg,#10b981,var(--green))}
+ .job{border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-top:12px;background:#0d142855}
+ .job-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+ .job-title{font-weight:700;font-size:15px}
+ .job-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+ .job-actions button{margin-top:0}
 </style>
 `
 
@@ -143,6 +194,8 @@ const signupHTML = `<!DOCTYPE html>
 <html lang="fr">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ComputeShare - Inscription</title>` + accountsCSS + accountsJS + `</head>
 <body>
+<div class="wrap">
+
 <h1>🥗 ComputeShare — Créer un compte</h1>
 <p class="muted">Déjà inscrit ? <a href="/login">Se connecter</a></p>
 
@@ -225,6 +278,7 @@ function doSignup(){
  .catch(function(e){document.getElementById('msg').innerHTML='<p class="err">Erreur : '+esc(e.message)+'</p>';});
 }
 </script>
+</div>
 </body>
 </html>`
 
@@ -232,6 +286,7 @@ const loginHTML = `<!DOCTYPE html>
 <html lang="fr">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ComputeShare - Connexion</title>` + accountsCSS + accountsJS + `</head>
 <body>
+<div class="wrap">
 <h1>🥗 ComputeShare — Connexion</h1>
 <p class="muted">Pas encore de compte ? <a href="/signup">S'inscrire</a></p>
 
@@ -253,6 +308,7 @@ function doLogin(){
  .catch(function(e){document.getElementById('msg').innerHTML='<p class="err">Erreur : '+esc(e.message)+'</p>';});
 }
 </script>
+</div>
 </body>
 </html>`
 
@@ -271,12 +327,20 @@ const meHTML = `<!DOCTYPE html>
 <html lang="fr">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ComputeShare - Mon espace entreprise</title>` + accountsCSS + accountsJS + `</head>
 <body>
-<h1>🥗 Mon espace entreprise</h1>
-<p class="muted"><span id="who"></span> — <a href="#" onclick="logout();return false;">Se déconnecter</a></p>
+<div class="wrap">
 
-<div class="card">
- <h2>Crédits</h2>
- <div id="bal">Actualisation...</div>
+<div class="top">
+ <div class="brand">
+  <div class="logo">🥗</div>
+  <div><h1>ComputeShare</h1><div class="sub">ESPACE ENTREPRISE</div></div>
+ </div>
+ <div class="muted"><span id="who"></span> — <a href="#" onclick="logout();return false;">Se déconnecter</a></div>
+</div>
+
+<div class="stats">
+ <div class="tile"><div class="tile-label">Crédits disponibles</div><div class="tile-value money" id="bal">…</div></div>
+ <div class="tile"><div class="tile-label">Dépensé HT (total)</div><div class="tile-value" id="spent">…</div></div>
+ <div class="tile"><div class="tile-label">Économie vs AWS</div><div class="tile-value" style="color:var(--cyan)" id="sav">…</div></div>
 </div>
 
 <div class="card">
@@ -323,17 +387,19 @@ renderAccountCard();
 refreshBalance();refreshUsage();
 function refreshBalance(){
  api('/v1/balance').then(function(b){
-  document.getElementById('bal').innerHTML='<p>Solde : <b>'+b.balance_eur.toFixed(2)+' EUR</b></p>';
- }).catch(function(e){document.getElementById('bal').innerHTML='<p class="err">'+esc(e.message)+'</p>';});
+  document.getElementById('bal').textContent=b.balance_eur.toFixed(2)+' €';
+ }).catch(function(e){document.getElementById('bal').textContent='—';});
 }
 function refreshUsage(){
  api('/v1/usage').then(function(u){
+  document.getElementById('spent').textContent=(u.spent_eur||0).toFixed(4)+' €';
+  document.getElementById('sav').textContent=(u.savings_pct||0).toFixed(1)+' %';
   var h='<table>'
-   +'<tr><th>Depense HT totale</th><td>'+(u.spent_eur||0).toFixed(6)+' EUR</td></tr>'
+   +'<tr><th>Dépense HT totale</th><td>'+(u.spent_eur||0).toFixed(6)+' EUR</td></tr>'
    +'<tr><th>TVA totale</th><td>'+(u.vat_eur||0).toFixed(6)+' EUR</td></tr>'
-   +'<tr><th>GPU-heures consommees</th><td>'+(u.gpu_hours||0).toFixed(4)+'</td></tr>'
-   +'<tr><th>Equivalent AWS</th><td>'+(u.aws_equivalent_eur||0).toFixed(4)+' EUR</td></tr>'
-   +'<tr><th>Economie vs AWS</th><td class="ok">'+(u.savings_pct||0).toFixed(1)+' %</td></tr>'
+   +'<tr><th>GPU-heures consommées</th><td>'+(u.gpu_hours||0).toFixed(4)+'</td></tr>'
+   +'<tr><th>Équivalent AWS</th><td>'+(u.aws_equivalent_eur||0).toFixed(4)+' EUR</td></tr>'
+   +'<tr><th>Économie vs AWS</th><td class="ok">'+(u.savings_pct||0).toFixed(1)+' %</td></tr>'
    +'<tr><th>Rechargements</th><td>'+(u.topups||0)+'</td></tr>'
    +'</table>';
   document.getElementById('usage').innerHTML=h;
@@ -369,17 +435,19 @@ function refreshJobs(){
    list.slice().reverse().forEach(function(j){
     var total=j.task_count||0,ch=j.chunks||{},done=(ch.done||0)+ (ch.failed||0)+(ch.canceled||0);
     var pct=total?Math.round(done*100/total):0;
-    var cls=j.status==='completed'?'ok':'muted';
-    h+='<div style="border-bottom:1px solid #334155;padding:10px 0">'
-     +'<b>'+esc(j.job_id)+'</b> <span class="'+cls+'">'+esc(j.status)+'</span> ('+pct+' %)'
+    var comp=j.status==='completed', failed=(ch.failed||0)>0;
+    var badge=comp?(failed?'<span class="chip fail">terminé ('+(ch.failed||0)+' échec'+((ch.failed||0)>1?'s':'')+')</span>':'<span class="chip done">✓ terminé</span>'):'<span class="chip run">● en cours</span>';
+    h+='<div class="job">'
+     +'<div class="job-head"><span class="job-title">'+esc(j.job_id)+'</span>'+badge+'</div>'
+     +'<div class="pbar'+(comp?' full':'')+'"><div style="width:'+pct+'%"></div></div>'
      +'<table><tr><th>Tâches</th><td>'+total+'</td></tr>';
     for(var k in ch){if(ch[k])h+='<tr><td>'+esc(k)+'</td><td>'+ch[k]+'</td></tr>';}
-    if(j.cost_eur!==undefined){h+='<tr><td>Coût HT réel</td><td>'+j.cost_eur.toFixed(6)+' EUR</td></tr><tr><td>Équivalent AWS</td><td>'+(j.gpu_hours||0).toFixed(4)+' GPU-h</td></tr>';}
-    h+='</table>';
-    if(j.status!=='completed'){
-     h+='<button class="gray" style="margin-top:6px;padding:6px 12px" onclick="cancelJob(\''+esc(j.job_id)+'\')">Annuler la file</button> ';
+    if(j.cost_eur!==undefined){h+='<tr><td>Coût HT réel</td><td>'+j.cost_eur.toFixed(6)+' EUR</td></tr><tr><td>GPU-heures</td><td>'+(j.gpu_hours||0).toFixed(4)+'</td></tr>';}
+    h+='</table><div class="job-actions">';
+    if(!comp){
+     h+='<button class="gray" onclick="cancelJob(\''+esc(j.job_id)+'\')">Annuler la file</button>';
     }
-    h+='<button class="gray" style="margin-top:6px;padding:6px 12px" onclick="showResults(\''+esc(j.job_id)+'\')">Résultats</button>'
+    h+='<button class="gray" onclick="showResults(\''+esc(j.job_id)+'\')">Résultats</button></div>'
      +'<div id="res-'+esc(j.job_id)+'" class="muted" style="font-size:13px;margin-top:6px"></div></div>';
    });
   }
@@ -405,6 +473,7 @@ if(jobsPoll)clearInterval(jobsPoll);
 refreshJobs();
 jobsPoll=setInterval(refreshJobs,5000);
 </script>
+</div>
 </body>
 </html>`
 
@@ -412,6 +481,7 @@ const sellerHTML = `<!DOCTYPE html>
 <html lang="fr">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ComputeShare - Mon espace fournisseur</title>` + accountsCSS + accountsJS + `</head>
 <body>
+<div class="wrap">
 <h1>🥗 Mon espace fournisseur</h1>
 <p class="muted"><span id="who"></span> — <a href="#" onclick="logout();return false;">Se déconnecter</a></p>
 
@@ -476,6 +546,7 @@ function rotate(){
  }).catch(function(e){alert('Erreur : '+e.message);});
 }
 </script>
+</div>
 </body>
 </html>`
 
@@ -483,6 +554,7 @@ const adminHTML = `<!DOCTYPE html>
 <html lang="fr">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ComputeShare - Console admin</title>` + accountsCSS + `</head>
 <body>
+<div class="wrap">
 <h1>🥗 Console admin</h1>
 <p class="muted">Accès réservé. La clé admin est dans le fichier .env du serveur (ADMIN_KEY).</p>
 
@@ -526,6 +598,7 @@ function refreshAll(){
  }).catch(function(e){document.getElementById('alerts').innerHTML='<p class="err">'+esc(e.message)+'</p>';});
 }
 </script>
+</div>
 </body>
 </html>`
 
@@ -551,6 +624,7 @@ const privacyHTML = `<!DOCTYPE html>
 <html lang="fr">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ComputeShare - CGU et confidentialité</title>` + accountsCSS + `</head>
 <body>
+<div class="wrap">
 <h1>🥗 ComputeShare — CGU (bêta) et politique de confidentialité</h1>
 
 <div class="card">
@@ -576,6 +650,7 @@ const privacyHTML = `<!DOCTYPE html>
  <p><b>Sous-traitants / hébergement :</b> le service est hébergé dans l'Union européenne (France). Aucune donnée n'est vendue. Aucun cookie publicitaire : seule une session locale (votre navigateur) est utilisée pour garder la connexion.</p>
  <p><b>Sécurité :</b> mots de passe hachés (bcrypt), sessions signées et révocables, jetons de nœud rotatifs, restriction des tentatives de connexion.</p>
  <p><a href="/signup">← Retour à l'inscription</a></p>
+</div>
 </div>
 </body>
 </html>`
