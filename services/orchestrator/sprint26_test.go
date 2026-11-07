@@ -27,7 +27,7 @@ func TestUploadEtDownloadResultat(t *testing.T) {
 		t.Fatal("soumission refusee")
 	}
 	ch := chunker.NextFor("node-a")
-	if !chunker.Complete(ch.ID, "node-a", "ok", "sha-abc", 10) {
+	if !chunker.Complete(ch.ID, "node-a", "ok", "sha-abc", "", 10) {
 		t.Fatal("completion refusee")
 	}
 
@@ -111,7 +111,7 @@ func TestUploadRefuseTropVolumineux(t *testing.T) {
 	job := Job{ID: "job-s26c", Command: "echo", TaskCount: 1, Zone: "europe"}
 	chunker.Submit(job, "")
 	ch := chunker.NextFor("node-a")
-	chunker.Complete(ch.ID, "node-a", "ok", "sha", 1)
+	chunker.Complete(ch.ID, "node-a", "ok", "sha", "", 1)
 
 	up := uploadResult(chunker, store)
 	req := httptest.NewRequest("POST", "/results", bytes.NewReader([]byte("x")))
@@ -179,7 +179,7 @@ func TestV1ResultsAnnonceDownload(t *testing.T) {
 	job := Job{ID: "job-s26d", Command: "echo", TaskCount: 1, Zone: "europe"}
 	chunker.Submit(job, org.ID)
 	ch := chunker.NextFor("node-a")
-	chunker.Complete(ch.ID, "node-a", "ok", "sha", 1)
+	chunker.Complete(ch.ID, "node-a", "ok", "sha", "", 1)
 	os.WriteFile(resultPath(ch.ID), []byte("data"), 0o644)
 
 	h := v1Results(orgs, chunker)

@@ -24,7 +24,7 @@ func TestCompleteIdempotentEtPayeLeRapporteur(t *testing.T) {
 
 	// Simulation : le chunk a ete re-attribue a node-b pendant
 	// l'execution (ch.NodeID change), mais node-a rapporte.
-	if !chunker.Complete(ch.ID, "node-a", "ok", "sha-1", 10) {
+	if !chunker.Complete(ch.ID, "node-a", "ok", "sha-1", "", 10) {
 		t.Fatal("premier rapport doit etre enregistre")
 	}
 	if bal := chunker.wallet.Balance("node-a"); bal <= 0 {
@@ -35,11 +35,11 @@ func TestCompleteIdempotentEtPayeLeRapporteur(t *testing.T) {
 	}
 
 	// Rapport en double : ignore, pas de second versement.
-	if chunker.Complete(ch.ID, "node-a", "ok", "sha-1", 10) {
+	if chunker.Complete(ch.ID, "node-a", "ok", "sha-1", "", 10) {
 		t.Fatal("un rapport en double doit etre ignore")
 	}
 	bal := chunker.wallet.Balance("node-a")
-	if chunker.Complete(ch.ID, "node-b", "ok", "sha-1", 10) {
+	if chunker.Complete(ch.ID, "node-b", "ok", "sha-1", "", 10) {
 		t.Fatal("un rapport en double (autre noeud) doit etre ignore")
 	}
 	if chunker.wallet.Balance("node-a") != bal {

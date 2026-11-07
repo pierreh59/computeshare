@@ -81,7 +81,7 @@ func TestPaiementTarifCPU(t *testing.T) {
 		t.Fatal("soumission refusee")
 	}
 	ch := chunker.NextFor("node-a")
-	if !chunker.Complete(ch.ID, "node-a", "ok", "sha", 3600) {
+	if !chunker.Complete(ch.ID, "node-a", "ok", "sha", "", 3600) {
 		t.Fatal("completion refusee")
 	}
 	if want := 0.02; chunker.wallet.Balance("node-a") != want {

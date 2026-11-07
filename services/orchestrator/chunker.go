@@ -68,6 +68,9 @@ type Chunk struct {
 	// Sprint 25 : heritage du flag GPU du job (routage + --gpus all
 	// cote desktop + choix du tarif CPU/GPU a la livraison).
 	Gpu bool `json:"gpu,omitempty"`
+	// Sprint 26b : detail d'erreur rapporte par le noeud (memoire
+	// seulement, affiche dans le journal du dashboard admin).
+	Detail string `json:"-"`
 	// LAI-51 : tarif gele a la livraison (EUR / GPU-heure).
 	PriceEurPerHour float64 `json:"price_eur_per_hour,omitempty"`
 	// Paiement calcule a la completion (EUR).
@@ -219,7 +222,7 @@ func (c *Chunker) NextFor(nodeID string) *Chunk {
 // rapport, pas de double paiement) et le paiement va au noeud qui
 // RAPPORTE (nodeID), pas au noeud theoretiquement assigne (en cas de
 // re-attribution pendant l'execution, l'ancien noeud doit etre paye).
-func (c *Chunker) Complete(chunkID, nodeID, outcome, sha string, durationSecs uint64) bool {
+func (c *Chunker) Complete(chunkID, nodeID, outcome, sha, detail string, durationSecs uint64) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, ch := range c.chunks {
@@ -248,8 +251,14 @@ func (c *Chunker) Complete(chunkID, nodeID, outcome, sha string, durationSecs ui
 				dashLog("chunk_done", fmt.Sprintf("%s termine par %s (%.0f s, verse %.6f EUR)",
 					ch.ID, ch.NodeID, float64(durationSecs), ch.PayoutEur))
 			} else {
-				dashLog("chunk_failed", fmt.Sprintf("%s ECHEC sur %s : %s",
-					ch.ID, ch.NodeID, outcome))
+				// Sprint 26b : le detail du noeud complete le
+				// verdict (motif Docker, fichier manquant, etc.).
+				ch.Detail = detail
+				msg := fmt.Sprintf("%s ECHEC sur %s : %s", ch.ID, ch.NodeID, outcome)
+				if detail != "" {
+					msg += " - " + detail
+				}
+				dashLog("chunk_failed", msg)
 			}
 			// LAI-43/44 : sampling et detection d'execution ralentie
 			// (logique detaillee dans fraud.go).
@@ -515,17 +524,22 @@ func nextChunk(c *Chunker) http.HandlerFunc {
 func completeChunk(c *Chunker) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var res struct {
-			ChunkID      string `json:"chunk_id"`
-			NodeID       string `json:"node_id"`
-			Outcome      string `json:"outcome"`
-			SHA256       string `json:"sha256"`
+			ChunkID string `json:"chunk_id"`
+			NodeID  string `json:"node_id"`
+			Outcome string `json:"outcome"`
+			SHA256  string `json:"sha256"`
+			// Sprint 26b : detail d'erreur optionnel (tronque).
+			Detail       string `json:"detail"`
 			DurationSecs uint64 `json:"duration_secs"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&res); err != nil {
 			http.Error(w, "invalid result", http.StatusBadRequest)
 			return
 		}
-		ok := c.Complete(res.ChunkID, res.NodeID, res.Outcome, res.SHA256, res.DurationSecs)
+		if len(res.Detail) > 500 {
+			res.Detail = res.Detail[:500]
+		}
+		ok := c.Complete(res.ChunkID, res.NodeID, res.Outcome, res.SHA256, res.Detail, res.DurationSecs)
 		writeJSON(w, map[string]bool{"recorded": ok})
 	}
 }

@@ -199,6 +199,8 @@ fn run_and_report(gateway: &str, node_id: &str, chunk: &serde_json::Value) {
         "outcome": res.outcome,
         "sha256": res.output_sha256.unwrap_or_default(),
         "duration_secs": (res.duration_ms / 1000) as u64,
+        // Sprint 26b : detail d erreur transmis au serveur (diagnostic).
+        "detail": res.detail,
     })
     .to_string();
     let _ = crate::http::post_json(gateway, "/chunk_result", &payload);
