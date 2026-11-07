@@ -207,25 +207,54 @@ fn run_and_report(gateway: &str, node_id: &str, chunk: &serde_json::Value) {
 
     // Sprint 26 : rapatriement du fichier de resultat. Le client doit
     // recevoir le fichier lui-meme, pas seulement son empreinte.
+    // Sprint 26c : chaque etape est tracee (fichier local %TEMP% +
+    // compte-rendu au serveur via /chunk_upload) car ce parcours a
+    // echoue silencieusement en vrai et l'UI seule ne suffit pas.
+    let mut note = String::new();
     if res.outcome == "ok" {
-        if let Some(p) = &res.output_path {
-            let taille = std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
-            if taille > 5 * 1024 * 1024 * 1024 {
-                set_error("fichier resultat trop volumineux (5 Go max), non rapatrie");
-            } else {
-                match std::fs::File::open(p) {
-                    Ok(f) => match crate::http::post_file(gateway, "/results", &res.chunk_id, f) {
-                        Some(r) if r.status == 200 => {
-                            status_cell().lock().unwrap().last_error.clear();
+        match &res.output_path {
+            None => {
+                note = "ok SANS chemin de fichier (bug noeud)".to_string();
+                trace(&format!("{} {}", res.chunk_id, note));
+            }
+            Some(p) => {
+                let taille = std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
+                trace(&format!("{} fichier {} octets a pousser", res.chunk_id, taille));
+                if taille > 5 * 1024 * 1024 * 1024 {
+                    note = "fichier trop volumineux (5 Go)".to_string();
+                    set_error("fichier resultat trop volumineux (5 Go max), non rapatrie");
+                } else {
+                    match std::fs::File::open(p) {
+                        Ok(f) => match crate::http::post_file(gateway, "/results", &res.chunk_id, f) {
+                            Some(r) if r.status == 200 => {
+                                note = format!("fichier pousse, HTTP 200");
+                                status_cell().lock().unwrap().last_error.clear();
+                            }
+                            Some(r) => {
+                                note = format!("refus HTTP {} corps: {}", r.status, r.body);
+                                set_error(&format!("upload resultat: HTTP {}", r.status));
+                            }
+                            None => {
+                                note = "gateway injoignable".to_string();
+                                set_error("upload resultat: gateway injoignable");
+                            }
+                        },
+                        Err(e) => {
+                            note = format!("ouverture fichier impossible: {e}");
+                            set_error("fichier resultat introuvable apres execution");
                         }
-                        Some(r) => set_error(&format!("upload resultat: HTTP {}", r.status)),
-                        None => set_error("upload resultat: gateway injoignable"),
-                    },
-                    Err(_) => set_error("fichier resultat introuvable apres execution"),
+                    }
                 }
+                trace(&format!("{} upload: {}", res.chunk_id, note));
             }
         }
     }
+    // Compte-rendu du rapatriement au serveur (journal admin).
+    let _ = crate::http::post_json(
+        gateway,
+        "/chunk_upload",
+        &serde_json::json!({"chunk_id": res.chunk_id, "node_id": node_id, "note": note}).to_string(),
+    );
 
     let mut st = status_cell().lock().unwrap();
     if res.outcome == "ok" {
@@ -279,4 +308,23 @@ fn run_chunk_gateway(gateway: &str, chunk: &serde_json::Value) -> crate::sandbox
 
 fn set_error(msg: &str) {
     status_cell().lock().unwrap().last_error = msg.to_string();
+}
+
+/// Sprint 26c : trace locale du noeud, append dans %TEMP%.
+/// Diagnostic du rapatriement (chaque etape, avec code HTTP).
+fn trace(msg: &str) {
+    use std::io::Write;
+    let p = std::env::temp_dir().join("computeshare-node.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
+        let _ = writeln!(f, "{} {}", chrono_like_now(), msg);
+    }
+}
+
+/// Horodatage simple sans dependance (secondes epoch).
+fn chrono_like_now() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_default()
 }

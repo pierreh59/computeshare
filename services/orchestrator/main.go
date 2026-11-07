@@ -12,7 +12,7 @@ import (
 
 // orchestratorVersion : version de l'orchestrateur, affichee sur le
 // dashboard admin et dans /healthz. A incrementer a chaque sprint.
-const orchestratorVersion = "v0.21.2"
+const orchestratorVersion = "v0.21.3"
 
 func main() {
 	port := os.Getenv("PORT")
@@ -126,6 +126,10 @@ func main() {
 	// Sprint 26 : le noeud pousse le fichier de resultat du chunk.
 	http.HandleFunc("/results", nodeAuth.withNodeToken(func(w http.ResponseWriter, r *http.Request, _ string) {
 		uploadResult(chunker, store).ServeHTTP(w, r)
+	}))
+	// Sprint 26c : compte-rendu du rapatriement (diagnostic).
+	http.HandleFunc("/chunk_upload", nodeAuth.withNodeToken(func(w http.ResponseWriter, r *http.Request, _ string) {
+		reportUploadNote().ServeHTTP(w, r)
 	}))
 
 	// LAI-51/52 : console admin (cle via en-tete X-Admin-Key).

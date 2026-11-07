@@ -15,6 +15,7 @@ package main
 // prevue si le volume devient le facteur limitant.
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -257,5 +258,32 @@ func purgeResultsLoop(store *Store) {
 			dashLog("result_purge", fmt.Sprintf("%d fichier(s) de resultat expires supprimes (retention 30 j)", n))
 			log.Printf("purge resultats: %d fichiers supprimes", n)
 		}
+	}
+}
+
+// POST /chunk_upload : compte-rendu du rapatriement envoye par le noeud
+// (Sprint 26c). Diagnostic seulement : chaque upload reussi, refuse ou
+// meme non tente est journalise cote serveur, ou l'UI du noeud ne
+// suffit pas (echec silencieux constate en prod).
+func reportUploadNote() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ChunkID string `json:"chunk_id"`
+			NodeID  string `json:"node_id"`
+			Note    string `json:"note"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ChunkID == "" {
+			http.Error(w, "invalid", http.StatusBadRequest)
+			return
+		}
+		if len(req.Note) > 300 {
+			req.Note = req.Note[:300]
+		}
+		msg := req.ChunkID + " rapatriement par " + req.NodeID + " : " + req.Note
+		if req.Note == "" {
+			msg += "(aucun compte-rendu, chunk non ok ?)"
+		}
+		dashLog("result_upload", msg)
+		writeJSON(w, map[string]bool{"recorded": true})
 	}
 }
