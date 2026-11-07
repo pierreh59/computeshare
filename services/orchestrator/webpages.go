@@ -289,7 +289,7 @@ const meHTML = `<!DOCTYPE html>
  <div id="imgRow" style="display:none">
   <label>Image du conteneur (registre Docker)</label><input id="img" value="alpine:latest">
  </div>
- <label>ID du job (unique)</label><input id="jid" value="">
+ <label>ID du job (unique)</label><input id="jid" value="" autocomplete="off" name="job-id">
  <label>Commande (ex: ffmpeg.exe, ou sh pour un conteneur)</label><input id="cmd" value="ffmpeg.exe">
  <label>Arguments (séparés par des espaces)</label><input id="args" value="">
  <label>Nombre de tâches</label><input id="count" value="1">
@@ -328,9 +328,15 @@ function refreshBalance(){
 }
 function refreshUsage(){
  api('/v1/usage').then(function(u){
-  var h='<table><tr><th>Mois</th><th>GPU-heures</th><th>Coût HT</th></tr>';
-  (u.months||[]).forEach(function(m){h+='<tr><td>'+esc(m.month)+'</td><td>'+(m.gpu_hours||0).toFixed(4)+'</td><td>'+(m.cost_eur||0).toFixed(4)+' EUR</td></tr>';});
-  document.getElementById('usage').innerHTML=h+'</table>';
+  var h='<table>'
+   +'<tr><th>Depense HT totale</th><td>'+(u.spent_eur||0).toFixed(6)+' EUR</td></tr>'
+   +'<tr><th>TVA totale</th><td>'+(u.vat_eur||0).toFixed(6)+' EUR</td></tr>'
+   +'<tr><th>GPU-heures consommees</th><td>'+(u.gpu_hours||0).toFixed(4)+'</td></tr>'
+   +'<tr><th>Equivalent AWS</th><td>'+(u.aws_equivalent_eur||0).toFixed(4)+' EUR</td></tr>'
+   +'<tr><th>Economie vs AWS</th><td class="ok">'+(u.savings_pct||0).toFixed(1)+' %</td></tr>'
+   +'<tr><th>Rechargements</th><td>'+(u.topups||0)+'</td></tr>'
+   +'</table>';
+  document.getElementById('usage').innerHTML=h;
  }).catch(function(e){document.getElementById('usage').innerHTML='<p class="muted">'+esc(e.message)+'</p>';});
 }
 function rtChange(){
