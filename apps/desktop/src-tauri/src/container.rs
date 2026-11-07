@@ -156,7 +156,7 @@ pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str, gpu: bool) -> C
         .spawn()
     {
         Ok(c) => c,
-        Err(e) => return mk("failed", &format!("spawn docker: {e}"), None),
+        Err(e) => return mk("failed", &format!("spawn docker: {e}"), None, None),
     };
 
     // Chien de garde : taskkill sur l'arbre docker.exe + docker rm -f.
@@ -177,7 +177,7 @@ pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str, gpu: bool) -> C
 
     let output = match child.wait_with_output() {
         Ok(o) => o,
-        Err(e) => return mk("failed", &format!("wait: {e}"), None),
+        Err(e) => return mk("failed", &format!("wait: {e}"), None, None),
     };
 
     if started.elapsed() >= timeout {
