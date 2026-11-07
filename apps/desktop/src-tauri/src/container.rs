@@ -20,6 +20,7 @@ const MAX_TIMEOUT_SECS: u64 = 3600;
 pub(crate) fn image_valide(image: &str) -> bool {
     !image.is_empty()
         && image.len() <= 500
+        && !image.starts_with('-')
         && !image.chars().any(|c| {
             c.is_whitespace()
                 || matches!(c, '"' | '\'' | '\\' | '`' | ';' | '$' | '|' | '&' | '<' | '>')
@@ -95,6 +96,15 @@ pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str) -> ChunkResult 
             .collect()
     };
 
+    // Sprint 20 (v2) : durcissement securite.
+    // - reseau coupe : le conteneur n'a acces ni a Internet ni au LAN
+    //   du fournisseur (anti-exfiltration).
+    // - cap-drop ALL + no-new-privileges : aucun privilege Linux,
+    //   interdiction de s'elever.
+    // - pids-limit : pas de bombe a processus.
+    // - read-only : systeme de fichiers fige, seul /work (le dossier
+    //   resultat, monte en lecture-ecriture) et /tmp (ephemere) sont
+    //   inscriptibles.
     let mut builder = Command::new("docker");
     builder
         .arg("run")
@@ -106,6 +116,17 @@ pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str) -> ChunkResult 
             "2g",
             "--cpus",
             "2",
+            "--network",
+            "none",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--pids-limit",
+            "256",
+            "--read-only",
+            "--tmpfs",
+            "/tmp:rw,size=64m",
             "-v",
             &format!("{win_mount}:/work"),
             "-w",
@@ -197,6 +218,14 @@ mod tests {
     fn refuse_vide_et_trop_long() {
         assert!(!image_valide(""));
         assert!(!image_valide(&"a".repeat(501)));
+    }
+
+    #[test]
+    fn refuse_tiret_initial() {
+        // Une image ne doit jamais pouvoir etre confondue avec un
+        // drapeau docker (ex. --privileged).
+        assert!(!image_valide("-privileged"));
+        assert!(!image_valide("--network=host"));
     }
 
     #[test]
