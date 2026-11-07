@@ -22,3 +22,12 @@
     nsExec::ExecToLog 'powershell -NoProfile -WindowStyle Hidden -EncodedCommand UwB0AGEAcgB0AC0AUAByAG8AYwBlAHMAcwAgAHcAaQBuAGcAZQB0ACAALQBBAHIAZwB1AG0AZQBuAHQATABpAHMAdAAgACcAaQBuAHMAdABhAGwAbAAnACwAJwAtAGUAJwAsACcALQAtAGkAZAAnACwAJwBEAG8AYwBrAGUAcgAuAEQAbwBjAGsAZQByAEQAZQBzAGsAdABvAHAAJwAsACcALQAtAHMAaQBsAGUAbgB0ACcALAAnAC0AYQBjAGMAZQBwAHQALQBwAGEAYwBrAGEAZwBlAG0AZQBuAHQAcwAnACwAJwAtAC0AYQBjAGMAZQBwAHQALQAtAHMAbwB1AHIAYwBlAC0AYQBnAHIAZQBlAG0AZQBuAHQAcwAnACAALQBWAGUAcgBiACAAUgB1AG4AQQBzAA=='
   skipDockerInstall:
 !macroend
+
+; Sprint 26b (0.7.1) : fermer l'app AVANT l'installation. Des fois le
+; processus reste bloque (double instance, lancement admin) et fait
+; echouer la mise a jour avec "Failed to kill ComputeShare". On force
+; la fermeture de l'arbre complete (app + processus WebView enfants).
+!macro NSIS_HOOK_PREINSTALL
+  nsExec::ExecToLog 'taskkill /F /T /IM computeshare-desktop.exe'
+  Sleep 1500
+!macroend
