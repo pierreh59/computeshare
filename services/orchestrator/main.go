@@ -12,7 +12,7 @@ import (
 
 // orchestratorVersion : version de l'orchestrateur, affichee sur le
 // dashboard admin et dans /healthz. A incrementer a chaque sprint.
-const orchestratorVersion = "v0.19.0"
+const orchestratorVersion = "v0.19.1"
 
 func main() {
 	port := os.Getenv("PORT")
@@ -308,7 +308,14 @@ func main() {
 	})
 
 	// LAI-30 : API v1 clients B2B (auth Bearer, cf. api/openapi.yaml).
-	http.HandleFunc("/v1/jobs", v1Submit(orgs, chunker, billing))
+	// Sprint 23 : GET /v1/jobs liste les jobs de l'org, POST soumet.
+	http.HandleFunc("/v1/jobs", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			v1JobsList(orgs, chunker, billing).ServeHTTP(w, r)
+			return
+		}
+		v1Submit(orgs, chunker, billing).ServeHTTP(w, r)
+	})
 	http.HandleFunc("/v1/jobs/", func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/status"):

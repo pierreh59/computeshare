@@ -368,6 +368,50 @@ func (c *Chunker) JobStatus(jobID string) map[string]int {
 	return st
 }
 
+// Sprint 23 : OrgJobs resume l'ensemble des jobs d'une organisation.
+// Retourne pour chaque job : id, nombre de taches, comptages par statut.
+// L'ordre est celui de la soumission (les chunks sont ajoutes sequentiellement).
+func (c *Chunker) OrgJobs(orgID string, limit int) []map[string]interface{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	order := []string{}
+	idx := map[string]int{}
+	for _, ch := range c.chunks {
+		if ch.OrgID != orgID {
+			continue
+		}
+		i, ok := idx[ch.JobID]
+		if !ok {
+			i = len(order)
+			idx[ch.JobID] = i
+			order = append(order, ch.JobID)
+		}
+	}
+	out := make([]map[string]interface{}, 0, len(order))
+	for _, jobID := range order {
+		st := map[string]int{
+			"queued": 0, "running": 0, "done": 0, "failed": 0, "canceled": 0,
+		}
+		total := 0
+		for _, ch := range c.chunks {
+			if ch.JobID == jobID && ch.OrgID == orgID {
+				st[ch.Status]++
+				total++
+			}
+		}
+		out = append(out, map[string]interface{}{
+			"job_id":     jobID,
+			"task_count": total,
+			"chunks":     st,
+		})
+	}
+	if limit > 0 && len(out) > limit {
+		// Les plus recents a la fin : on garde la fin de la liste.
+		out = out[len(out)-limit:]
+	}
+	return out
+}
+
 // --- Endpoints HTTP ---
 
 // POST /jobs : le client soumet un job, recoit ses chunks.

@@ -281,19 +281,28 @@ const meHTML = `<!DOCTYPE html>
 
 <div class="card">
  <h2>Soumettre un job</h2>
+ <label>Type de job</label>
+ <select id="rt" onchange="rtChange()" style="width:100%;padding:8px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0">
+   <option value="allowlist">Classique (commande autorisée, ex: ffmpeg.exe)</option>
+   <option value="container">Conteneur (image Docker, ex: alpine:latest)</option>
+ </select>
+ <div id="imgRow" style="display:none">
+  <label>Image du conteneur (registre Docker)</label><input id="img" value="alpine:latest">
+ </div>
  <label>ID du job (unique)</label><input id="jid" value="">
- <label>Commande (ex: ffmpeg.exe)</label><input id="cmd" value="ffmpeg.exe">
+ <label>Commande (ex: ffmpeg.exe, ou sh pour un conteneur)</label><input id="cmd" value="ffmpeg.exe">
  <label>Arguments (séparés par des espaces)</label><input id="args" value="">
  <label>Nombre de tâches</label><input id="count" value="1">
  <label>Nom du fichier résultat (ex: out.mp4)</label><input id="outname" value="out.mp4">
+ <label>Délai maximum par tâche (secondes)</label><input id="tmo" value="600">
  <button onclick="submitJob()">Soumettre</button>
  <div id="msg"></div>
 </div>
 
-<div class="card" id="trackCard" style="display:none">
- <h2>Suivi : <span id="tjid"></span></h2>
- <div class="bar" style="background:#334155;border-radius:99px;height:14px;overflow:hidden;margin-top:8px"><div id="pbar" style="background:#22c55e;height:100%;width:0;transition:width .5s"></div></div>
- <table id="stats"></table>
+<div class="card">
+ <h2>Mes jobs</h2>
+ <p class="muted">Actualisation automatique toutes les 5 secondes.</p>
+ <div id="jobs">Chargement...</div>
 </div>
 
 <div class="card">
@@ -324,37 +333,71 @@ function refreshUsage(){
   document.getElementById('usage').innerHTML=h+'</table>';
  }).catch(function(e){document.getElementById('usage').innerHTML='<p class="muted">'+esc(e.message)+'</p>';});
 }
+function rtChange(){
+ var c=document.getElementById('rt').value==='container';
+ document.getElementById('imgRow').style.display=c?'block':'none';
+ document.getElementById('cmd').value=c?'sh':'ffmpeg.exe';
+}
 function submitJob(){
  var id=document.getElementById('jid').value.trim();
  if(!id){document.getElementById('msg').innerHTML='<p class="err">Choisissez un ID de job.</p>';return;}
  var body={id:id,command:document.getElementById('cmd').value.trim(),
   args:document.getElementById('args').value.split(' ').filter(Boolean),
   task_count:parseInt(document.getElementById('count').value)||1,
-  timeout_secs:600,output_name:document.getElementById('outname').value.trim()};
+  timeout_secs:parseInt(document.getElementById('tmo').value)||600,
+  output_name:document.getElementById('outname').value.trim()};
+ var rt=document.getElementById('rt').value;
+ if(rt==='container'){body.runtime='container';body.image=document.getElementById('img').value.trim();}
  api('/v1/jobs',{method:'POST',body:JSON.stringify(body)}).then(function(r){
-  document.getElementById('msg').innerHTML='<p class="ok">Job '+esc(r.job_id+' soumis ('+r.task_count+' tâches)')+'</p>';
-  startTracking(body.id);
+  document.getElementById('msg').innerHTML='<p class="ok">Job '+esc(r.job_id)+' soumis ('+r.task_count+' tâches).</p>';
+  document.getElementById('jid').value='';
+  refreshJobs();
  }).catch(function(e){document.getElementById('msg').innerHTML='<p class="err">'+esc(e.message)+'</p>';});
 }
-var poll=null;
-function startTracking(job){
- document.getElementById('trackCard').style.display='block';
- document.getElementById('tjid').textContent=job;
- if(poll)clearInterval(poll);
- poll=setInterval(function(){tick(job);},2000);tick(job);
+var jobsPoll=null;
+function refreshJobs(){
+ api('/v1/jobs').then(function(list){
+  var h='';
+  if(!list.length){h='<p class="muted">Aucun job pour le moment. Soumettez votre premier job ci-dessus.</p>';}
+  else{
+   list.slice().reverse().forEach(function(j){
+    var total=j.task_count||0,ch=j.chunks||{},done=(ch.done||0)+ (ch.failed||0)+(ch.canceled||0);
+    var pct=total?Math.round(done*100/total):0;
+    var cls=j.status==='completed'?'ok':'muted';
+    h+='<div style="border-bottom:1px solid #334155;padding:10px 0">'
+     +'<b>'+esc(j.job_id)+'</b> <span class="'+cls+'">'+esc(j.status)+'</span> ('+pct+' %)'
+     +'<table><tr><th>Tâches</th><td>'+total+'</td></tr>';
+    for(var k in ch){if(ch[k])h+='<tr><td>'+esc(k)+'</td><td>'+ch[k]+'</td></tr>';}
+    if(j.cost_eur!==undefined){h+='<tr><td>Coût HT réel</td><td>'+j.cost_eur.toFixed(6)+' EUR</td></tr><tr><td>Équivalent AWS</td><td>'+(j.gpu_hours||0).toFixed(4)+' GPU-h</td></tr>';}
+    h+='</table>';
+    if(j.status!=='completed'){
+     h+='<button class="gray" style="margin-top:6px;padding:6px 12px" onclick="cancelJob(\''+esc(j.job_id)+'\')">Annuler la file</button> ';
+    }
+    h+='<button class="gray" style="margin-top:6px;padding:6px 12px" onclick="showResults(\''+esc(j.job_id)+'\')">Résultats</button>'
+     +'<div id="res-'+esc(j.job_id)+'" class="muted" style="font-size:13px;margin-top:6px"></div></div>';
+   });
+  }
+  document.getElementById('jobs').innerHTML=h;
+  refreshBalance();
+ }).catch(function(e){document.getElementById('jobs').innerHTML='<p class="err">'+esc(e.message)+'</p>';});
 }
-function tick(job){
- api('/v1/jobs/'+encodeURIComponent(job)+'/status').then(function(st){
-  var total=0;for(var k in st.chunks){total+=st.chunks[k];}
-  var pct=total?Math.round((st.chunks.done||0)*100/total):0;
-  document.getElementById('pbar').style.width=pct+'%';
-  var rows='<tr><th>Status</th><td>'+esc(st.status)+' ('+pct+'%)</td></tr>';
-  for(var k in st.chunks){rows+='<tr><td>'+esc(k)+'</td><td>'+st.chunks[k]+'</td></tr>';}
-  if(st.cost_eur!==undefined){rows+='<tr><td>Coût HT réel</td><td>'+st.cost_eur.toFixed(6)+' EUR</td></tr><tr><td>Équivalent AWS</td><td>'+st.aws_equiv_eur.toFixed(6)+' EUR</td></tr>';}
-  document.getElementById('stats').innerHTML=rows;
-  if(st.status==='completed'){clearInterval(poll);poll=null;refreshBalance();refreshUsage();}
- }).catch(function(e){clearInterval(poll);poll=null;});
+function cancelJob(id){
+ api('/v1/jobs/'+encodeURIComponent(id)+'/cancel',{method:'POST'}).then(function(r){
+  refreshJobs();
+ }).catch(function(e){alert('Annulation impossible : '+e.message);});
 }
+function showResults(id){
+ api('/v1/jobs/'+encodeURIComponent(id)+'/results').then(function(chunks){
+  var h='<table>';
+  (chunks||[]).forEach(function(c){
+   h+='<tr><td>'+esc(c.id)+'</td><td class="'+(c.status==='done'?'ok':'err')+'">'+esc(c.status)+'</td><td style="font-size:12px;word-break:break-all">'+esc(c.result_sha256||'')+'</td></tr>';
+  });
+  document.getElementById('res-'+id).innerHTML=h+'</table>';
+ }).catch(function(e){document.getElementById('res-'+id).textContent=e.message;});
+}
+if(jobsPoll)clearInterval(jobsPoll);
+refreshJobs();
+jobsPoll=setInterval(refreshJobs,5000);
 </script>
 </body>
 </html>`

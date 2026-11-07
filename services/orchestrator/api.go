@@ -77,6 +77,39 @@ func v1Submit(orgs *OrgStore, c *Chunker, b *Billing) http.HandlerFunc {
 	}
 }
 
+// GET /v1/jobs : liste des jobs de l'organisation (sprint 23) :
+// pour chaque job, statuts des taches, statut global et cout reel.
+func v1JobsList(orgs *OrgStore, c *Chunker, b *Billing) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		org := orgs.Authenticate(r)
+		if org == nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		jobs := c.OrgJobs(org.ID, 50)
+		for _, j := range jobs {
+			id := j["job_id"].(string)
+			chunks := j["chunks"].(map[string]int)
+			total := j["task_count"].(int)
+			finished := chunks["done"] + chunks["failed"] + chunks["canceled"]
+			status := "running"
+			if total > 0 && finished == total {
+				status = "completed"
+			}
+			j["status"] = status
+			costEur, vatEur, gpuHours := b.JobCost(org.ID, id)
+			j["cost_eur"] = costEur
+			j["vat_eur"] = vatEur
+			j["gpu_hours"] = gpuHours
+		}
+		writeJSON(w, jobs)
+	}
+}
+
 // jobIDFrom extrait l'ID d'un chemin /v1/jobs/<id>/<action>.
 func jobIDFrom(path, action string) string {
 	rest := strings.TrimPrefix(path, "/v1/jobs/")
@@ -113,12 +146,12 @@ func v1Status(orgs *OrgStore, c *Chunker, b *Billing) http.HandlerFunc {
 		}
 		costEur, vatEur, gpuHours := b.JobCost(org.ID, jobID)
 		writeJSON(w, map[string]interface{}{
-			"job_id":      jobID,
-			"status":      status,
-			"chunks":      st,
-			"cost_eur":    costEur,
-			"vat_eur":     vatEur,
-			"gpu_hours":   gpuHours,
+			"job_id":        jobID,
+			"status":        status,
+			"chunks":        st,
+			"cost_eur":      costEur,
+			"vat_eur":       vatEur,
+			"gpu_hours":     gpuHours,
 			"aws_equiv_eur": gpuHours * awsCompareEurPerHour,
 		})
 	}
