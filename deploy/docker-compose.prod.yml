@@ -21,6 +21,11 @@ services:
       # "non verifies" (AUCUNE inscription n'est bloquee).
       INSEE_KEY: ${INSEE_KEY:-}
       INSEE_SECRET: ${INSEE_SECRET:-}
+      # Sprint 26 : fichiers de resultats rapatries, sur volume dedie
+      # pour survivre aux rebuilds du conteneur.
+      RESULTS_DIR: /data/results
+    volumes:
+      - resultsdata:/data
     depends_on:
       db:
         condition: service_healthy
@@ -107,5 +112,6 @@ services:
 
 volumes:
   pgdata: {}
+  resultsdata: {}
   caddydata: {}
   caddyconfig: {}

@@ -203,6 +203,28 @@ fn run_and_report(gateway: &str, node_id: &str, chunk: &serde_json::Value) {
     .to_string();
     let _ = crate::http::post_json(gateway, "/chunk_result", &payload);
 
+    // Sprint 26 : rapatriement du fichier de resultat. Le client doit
+    // recevoir le fichier lui-meme, pas seulement son empreinte.
+    if res.outcome == "ok" {
+        if let Some(p) = &res.output_path {
+            let taille = std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
+            if taille > 5 * 1024 * 1024 * 1024 {
+                set_error("fichier resultat trop volumineux (5 Go max), non rapatrie");
+            } else {
+                match std::fs::File::open(p) {
+                    Ok(f) => match crate::http::post_file(gateway, "/results", &res.chunk_id, f) {
+                        Some(r) if r.status == 200 => {
+                            status_cell().lock().unwrap().last_error.clear();
+                        }
+                        Some(r) => set_error(&format!("upload resultat: HTTP {}", r.status)),
+                        None => set_error("upload resultat: gateway injoignable"),
+                    },
+                    Err(_) => set_error("fichier resultat introuvable apres execution"),
+                }
+            }
+        }
+    }
+
     let mut st = status_cell().lock().unwrap();
     if res.outcome == "ok" {
         st.chunks_done += 1;
@@ -234,6 +256,7 @@ fn run_chunk_gateway(gateway: &str, chunk: &serde_json::Value) -> crate::sandbox
             detail: "chunk sans identifiant".into(),
             duration_ms: 0,
             output_sha256: None,
+            output_path: None,
         };
     }
     // Sprint 19 (v2) : un chunk conteneur est route vers docker,

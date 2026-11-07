@@ -354,6 +354,19 @@ func (c *Chunker) CancelJob(jobID string) int {
 	return n
 }
 
+// Sprint 26 : retrouve un chunk en memoire, quel que soit son statut
+// (sert a l'upload des fichiers de resultat).
+func (c *Chunker) ChunkByID(chunkID string) *Chunk {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, ch := range c.chunks {
+		if ch.ID == chunkID {
+			return ch
+		}
+	}
+	return nil
+}
+
 // Results liste les chunks termines d'un job avec leurs checksums.
 func (c *Chunker) Results(jobID string) []Chunk {
 	c.mu.Lock()

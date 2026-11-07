@@ -10,6 +10,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -745,4 +746,90 @@ func (s *Store) LoadOrgJobs(orgID string, limit int) []OrgJobRow {
 		}
 	}
 	return out
+}
+
+// --- Sprint 26 : fichiers de resultat ---
+
+// ResultRow : metadonnees d'un fichier de resultat pousse par un noeud.
+type ResultRow struct {
+	ChunkID  string
+	JobID    string
+	OrgID    string
+	FileName string
+	Size     int64
+	SHA256   string
+}
+
+// SaveResult enregistre les metadonnees d'un fichier de resultat.
+func (s *Store) SaveResult(r ResultRow) {
+	if !s.enabled() {
+		return
+	}
+	_, err := s.db.Exec(`INSERT INTO runtime_results
+		(chunk_id, job_id, org_id, file_name, size_bytes, sha256, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6, now())
+		ON CONFLICT (chunk_id) DO UPDATE SET
+		  size_bytes = EXCLUDED.size_bytes,
+		  sha256    = EXCLUDED.sha256,
+		  file_name = EXCLUDED.file_name,
+		  created_at = now()`,
+		r.ChunkID, r.JobID, r.OrgID, r.FileName, r.Size, r.SHA256)
+	if err != nil {
+		log.Printf("store.SaveResult: %v", err)
+	}
+}
+
+// LoadResult retrouve les metadonnees d'un fichier de resultat.
+func (s *Store) LoadResult(chunkID string) *ResultRow {
+	if !s.enabled() {
+		return nil
+	}
+	var r ResultRow
+	err := s.db.QueryRow(`SELECT chunk_id, job_id, org_id,
+		COALESCE(file_name, 'result.bin'), size_bytes, COALESCE(sha256, '')
+		FROM runtime_results WHERE chunk_id = $1`, chunkID).
+		Scan(&r.ChunkID, &r.JobID, &r.OrgID, &r.FileName, &r.Size, &r.SHA256)
+	if err != nil {
+		return nil
+	}
+	return &r
+}
+
+// PurgeOldResults supprime les resultats plus vieux que la retention
+// et retourne leurs chunk_id (pour effacer aussi les fichiers).
+func (s *Store) PurgeOldResults(olderThan time.Duration) []string {
+	if !s.enabled() {
+		return nil
+	}
+	rows, err := s.db.Query(`DELETE FROM runtime_results
+		WHERE created_at < now() - $1::interval
+		RETURNING chunk_id`, fmt.Sprintf("%d seconds", int(olderThan.Seconds())))
+	if err != nil {
+		log.Printf("store.PurgeOldResults: %v", err)
+		return nil
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// ChunkFromDB retrouve un chunk termine uniquement connu de la base
+// (apres un redemarrage du serveur). Retourne org + fichier attendu.
+func (s *Store) ChunkFromDB(chunkID string) (orgID, status, outputName string) {
+	if !s.enabled() {
+		return "", "", ""
+	}
+	err := s.db.QueryRow(`SELECT COALESCE(org_id, ''), status,
+		COALESCE(expected_output, '') FROM runtime_chunks WHERE id = $1`, chunkID).
+		Scan(&orgID, &status, &outputName)
+	if err != nil {
+		return "", "", ""
+	}
+	return orgID, status, outputName
 }

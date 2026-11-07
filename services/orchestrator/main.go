@@ -12,7 +12,7 @@ import (
 
 // orchestratorVersion : version de l'orchestrateur, affichee sur le
 // dashboard admin et dans /healthz. A incrementer a chaque sprint.
-const orchestratorVersion = "v0.20.0"
+const orchestratorVersion = "v0.21.0"
 
 func main() {
 	port := os.Getenv("PORT")
@@ -122,6 +122,10 @@ func main() {
 	}))
 	http.HandleFunc("/chunk_result", nodeAuth.withNodeToken(func(w http.ResponseWriter, r *http.Request, _ string) {
 		completeChunk(chunker).ServeHTTP(w, r)
+	}))
+	// Sprint 26 : le noeud pousse le fichier de resultat du chunk.
+	http.HandleFunc("/results", nodeAuth.withNodeToken(func(w http.ResponseWriter, r *http.Request, _ string) {
+		uploadResult(chunker, store).ServeHTTP(w, r)
 	}))
 
 	// LAI-51/52 : console admin (cle via en-tete X-Admin-Key).
@@ -346,6 +350,11 @@ func main() {
 			http.NotFound(w, r)
 		}
 	})
+	// Sprint 26 : telechargement d'un fichier de resultat par le client.
+	http.HandleFunc("/v1/results/", downloadResult(orgs, chunker, store))
+
+	// Sprint 26 : purge des fichiers de resultat expires (30 jours).
+	go purgeResultsLoop(store)
 
 	// LAI-28 : object store des assets clients (auth Bearer).
 	http.HandleFunc("/v1/assets", v1UploadAsset(orgs, store))

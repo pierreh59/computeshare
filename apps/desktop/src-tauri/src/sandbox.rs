@@ -36,6 +36,9 @@ pub struct ChunkResult {
     pub detail: String,
     pub duration_ms: u128,
     pub output_sha256: Option<String>,
+    /// Sprint 26 : chemin du fichier de resultat sur le noeud, a
+    /// rapatrier vers le serveur apres le rapport (None si echec).
+    pub output_path: Option<String>,
 }
 
 const MAX_DETAIL_BYTES: usize = 16 * 1024;
@@ -66,23 +69,24 @@ fn is_allowed(command: &str) -> bool {
 /// Prepare et execute un chunk dans son repertoire sandbox dedie.
 pub fn run_chunk(spec: ChunkSpec) -> ChunkResult {
     let started = Instant::now();
-    let mk = |outcome: &str, detail: &str, sha: Option<String>| ChunkResult {
+    let mk = |outcome: &str, detail: &str, sha: Option<String>, path: Option<String>| ChunkResult {
         chunk_id: spec.chunk_id.clone(),
         outcome: outcome.to_string(),
         detail: detail.to_string(),
         duration_ms: started.elapsed().as_millis(),
         output_sha256: sha,
+        output_path: path,
     };
 
     if !is_allowed(&spec.command) {
-        return mk("rejected", "commande hors allowlist", None);
+        return mk("rejected", "commande hors allowlist", None, None);
     }
     let dir = PathBuf::from(std::env::temp_dir())
         .join("computeshare-sandbox")
         .join(sanitize_id(&spec.chunk_id));
     let _ = fs::remove_dir_all(&dir);
     if fs::create_dir_all(&dir).is_err() {
-        return mk("failed", "impossible de creer le repertoire sandbox", None);
+        return mk("failed", "impossible de creer le repertoire sandbox", None, None);
     }
 
     let timeout = if spec.timeout_secs == 0 {
@@ -110,7 +114,7 @@ pub fn run_chunk(spec: ChunkSpec) -> ChunkResult {
     let mut builder: std::process::Command = if spec.command == "echo" {
         for a in &spec.args {
             if a.chars().any(|c| "&|<>\"'^%".contains(c)) {
-                return mk("rejected", "argument interdit pour echo", None);
+                return mk("rejected", "argument interdit pour echo", None, None);
             }
         }
         #[cfg(windows)]
@@ -149,7 +153,7 @@ pub fn run_chunk(spec: ChunkSpec) -> ChunkResult {
         .spawn()
     {
         Ok(c) => c,
-        Err(e) => return mk("failed", &format!("spawn: {}", e), None),
+        Err(e) => return mk("failed", &format!("spawn: {}", e), None, None),
     };
 
     // Chien de garde : tue l'arbre de processus au bout du timeout.
@@ -170,18 +174,19 @@ pub fn run_chunk(spec: ChunkSpec) -> ChunkResult {
 
     let output = match child.wait_with_output() {
         Ok(o) => o,
-        Err(e) => return mk("failed", &format!("wait: {}", e), None),
+        Err(e) => return mk("failed", &format!("wait: {}", e), None, None),
     };
     if started.elapsed() >= timeout {
-        return mk("timeout", "delai depasse, processus tue", None);
+        return mk("timeout", "delai depasse, processus tue", None, None);
     }
     if !output.status.success() {
-        return mk("failed", &tail_utf8(&output.stderr), None);
+        return mk("failed", &tail_utf8(&output.stderr), None, None);
     }
     let out_path = dir.join(&out_name);
     match hash_file(&out_path) {
-        Some(sha) => mk("ok", "chunk termine", Some(sha)),
-        None => mk("bad_output", "fichier resultat manquant", None),
+        // Sprint 26 : le fichier de resultat est rapatrie apres rapport.
+        Some(sha) => mk("ok", "chunk termine", Some(sha), Some(out_path.to_string_lossy().into_owned())),
+        None => mk("bad_output", "fichier resultat manquant", None, None),
     }
 }
 

@@ -38,16 +38,17 @@ pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str, gpu: bool) -> C
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let started = Instant::now();
 
-    let mk = |outcome: &str, detail: &str, sha: Option<String>| ChunkResult {
+    let mk = |outcome: &str, detail: &str, sha: Option<String>, path: Option<String>| ChunkResult {
         chunk_id: spec.chunk_id.clone(),
         outcome: outcome.to_string(),
         detail: detail.to_string(),
         duration_ms: started.elapsed().as_millis(),
         output_sha256: sha,
+        output_path: path,
     };
 
     if !image_valide(image) {
-        return mk("rejected", "reference d'image conteneur invalide", None);
+        return mk("rejected", "reference d'image conteneur invalide", None, None);
     }
 
     // Docker Desktop doit etre lance : `docker version` ne reussit que
@@ -63,6 +64,7 @@ pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str, gpu: bool) -> C
             "failed",
             "docker introuvable ou arrete (installez/lancez Docker Desktop)",
             None,
+            None,
         );
     }
 
@@ -72,7 +74,7 @@ pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str, gpu: bool) -> C
         .join(sanitize_id(&spec.chunk_id));
     let _ = std::fs::remove_dir_all(&dir);
     if std::fs::create_dir_all(&dir).is_err() {
-        return mk("failed", "impossible de creer le repertoire sandbox", None);
+        return mk("failed", "impossible de creer le repertoire sandbox", None, None);
     }
     // Docker accepte les chemins Windows avec des / : C:/Users/...
     let win_mount = dir.to_string_lossy().replace('\\', "/");
@@ -179,7 +181,7 @@ pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str, gpu: bool) -> C
     };
 
     if started.elapsed() >= timeout {
-        return mk("timeout", "delai depasse, conteneur interrompu", None);
+        return mk("timeout", "delai depasse, conteneur interrompu", None, None);
     }
     if !output.status.success() {
         let detail = format!(
@@ -187,14 +189,16 @@ pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str, gpu: bool) -> C
             output.status.code(),
             tail_utf8(&output.stderr)
         );
-        return mk("failed", &detail, None);
+        return mk("failed", &detail, None, None);
     }
 
     // Fichier resultat attendu dans le dossier monte (cote Windows).
     let out_path = dir.join(&out_name);
     match hash_file(&out_path) {
-        Some(sha) => mk("ok", "chunk conteneur termine", Some(sha)),
-        None => mk("bad_output", "fichier resultat manquant", None),
+        // Sprint 26 : fichier de resultat rapatrie apres rapport.
+        Some(sha) => mk("ok", "chunk conteneur termine", Some(sha),
+            Some(out_path.to_string_lossy().into_owned())),
+        None => mk("bad_output", "fichier resultat manquant", None, None),
     }
 }
 
@@ -206,6 +210,7 @@ pub(crate) fn run_container_chunk(_spec: &ChunkSpec, _image: &str, _gpu: bool) -
         detail: "conteneurs supportes uniquement sous Windows avec WSL2".into(),
         duration_ms: 0,
         output_sha256: None,
+        output_path: None,
     }
 }
 

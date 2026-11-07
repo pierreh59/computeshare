@@ -174,7 +174,23 @@ func v1Results(orgs *OrgStore, c *Chunker) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
-		writeJSON(w, c.Results(jobID))
+		// Sprint 26 : chaque chunk termine indique si son fichier de
+		// resultat est telechargeable (URL + taille).
+		out := []map[string]interface{}{}
+		for _, ch := range c.Results(jobID) {
+			row := map[string]interface{}{
+				"chunk_id":      ch.ID,
+				"node_id":       ch.NodeID,
+				"result_sha256": ch.ResultSHA256,
+				"duration_secs": ch.DurationSecs,
+			}
+			if size := resultFileInfo(ch.ID); size > 0 {
+				row["download_url"] = "/v1/results/" + ch.ID
+				row["size_bytes"] = size
+			}
+			out = append(out, row)
+		}
+		writeJSON(w, out)
 	}
 }
 

@@ -86,3 +86,29 @@ pub fn post_json(url: &str, path: &str, body: &str) -> Option<Response> {
 pub fn post_json_bearer(bearer: &str, url: &str, path: &str, body: &str) -> Option<Response> {
     request_bearer("POST", url, path, Some(body), Some(bearer))
 }
+
+/// Sprint 26 : upload du fichier de resultat d'un chunk (octets bruts,
+/// en-tete X-Chunk-Id). Timeout dedie : un gros fichier (jusqu'a 5 Go)
+/// peut prendre longtemps a monter, on ne reutilise pas le timeout de
+/// 30 s des appels JSON.
+pub fn post_file(url: &str, path: &str, chunk_id: &str, file: std::fs::File) -> Option<Response> {
+    let full = full_url(url, path);
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(3600))
+        .build();
+    let resp = agent
+        .request("POST", &full)
+        .set("X-Node-Token", &node_token())
+        .set("X-Chunk-Id", chunk_id)
+        .set("Content-Type", "application/octet-stream")
+        .send(file);
+    let resp = match resp {
+        Ok(r) => r,
+        Err(ureq::Error::Status(_, r)) => r,
+        Err(_) => return None,
+    };
+    let status = resp.status();
+    let body = resp.into_string().unwrap_or_default();
+    Some(Response { status, body })
+}
