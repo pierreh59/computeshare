@@ -131,15 +131,15 @@ pub(crate) fn run_container_chunk(spec: &ChunkSpec, image: &str, gpu: bool) -> C
             &format!("{win_mount}:/work"),
             "-w",
             "/work",
-        ])
-        // Sprint 25 : le GPU n'est expose QUE si le job le demande
-        // ("gpu": true). Les jobs CPU restent sans GPU (et factures au
-        // tarif CPU). Tous les garde-fous du sprint 20 sont conserves.
-        // NB : le drapeau doit preceder le nom de l'image.
-        if gpu {
-            builder.args(["--gpus", "all"]);
-        }
-        builder
+        ]);
+    // Sprint 25 : le GPU n'est expose QUE si le job le demande
+    // ("gpu": true). Les jobs CPU restent sans GPU (et factures au
+    // tarif CPU). Tous les garde-fous du sprint 20 sont conserves.
+    // NB : le drapeau doit preceder le nom de l'image.
+    if gpu {
+        builder.args(["--gpus", "all"]);
+    }
+    builder
         .arg(image)
         .arg(&spec.command)
         .args(&spec.args);
