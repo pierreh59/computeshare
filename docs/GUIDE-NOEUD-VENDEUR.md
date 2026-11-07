@@ -1,1 +1,96 @@
-"# Guide fournisseur de puissance - ComputeShare\n\nCe guide s'adresse aux particuliers (fournisseurs) qui louent la\npuissance oisive de leur machine sur ComputeShare.\n\n## 1. Principe\n\nVous installez l'application desktop ComputeShare. Quand vous\nn'utilisez pas votre machine (pas de souris ni de clavier pendant\n60 secondes), l'application :\n\n1. signale votre disponibilite a la plateforme ;\n2. recupere une tache d'un job client ;\n3. l'execute dans un sandbox isole ;\n4. remonte le resultat (verifie par empreinte SHA-256) ;\n5. credite votre wallet vendeur, a la duree reelle d'execution.\n\nVous reprenez la main a tout moment : la tache en cours se termine,\naucune nouvelle n'est prise tant que vous utilisez la machine.\n\n## 2. Installation\n\nPrerequis : Windows 10/11, une carte GPU NVIDIA, ~2 Go d'espace\ndisque.\n\n1. Recuperer le jeton d'enrolement fourni pendant la beta (variable\n   `COMPUTERSHARE_NODE_TOKEN`).\n2. Lancer l'installation de l'application. Si Docker Desktop n'est\n   pas encore installe, l'installateur le lance automatiquement en\n   arriere-plan (une confirmation Windows peut etre demandee) : c'est\n   le moteur des jobs conteneur, les mieux payes.\n3. Lancer l'application, renseigner l'adresse de la plateforme\n   (gateway) puis \"Demarrer le noeud\".\n4. C'est tout. L'application tourne en arriere-plan.\n\n### Docker Desktop (jobs conteneur et GPU)\n\n- Sans Docker : le noeud reste utilisable pour les jobs allowlist\n  (commandes simples), mais ne recoit pas de jobs conteneur.\n- Avec Docker : le noeud recoit aussi les jobs conteneur. Si le PC a\n  un GPU NVIDIA a jour, l'application verifie au demarrage que le\n  GPU est accessible depuis les conteneurs ; le noeud est alors\n  marque \"GPU pret\" et recoit les jobs GPU (factures au tarif GPU,\n  plus eleve).\n- Si Docker vient d'etre installe, relancez l'application une fois\n  qu'il est demarre (icone de baleine fixe dans la barre des taches).\n\nVerif rapide (invite PowerShell) que le GPU passe dans les\nconteneurs :\n\n```\ndocker run --rm --gpus all alpine true\n```\n\nPas d'erreur = tout est pret.\n\n## 3. Securite : ce que la plateforme peut (et ne peut pas) faire\n\nL'execution est confinee dans un sandbox :\n\n- uniquement les programmes autorises (allowlist) ;\n- pas d'acces reseau pendant l'execution ;\n- repertoire de travail temporaire, efface ensuite ;\n- pas d'acces a vos fichiers personnels ;\n- timeout d'execution maximal.\n\nVous pouvez arreter le noeud a tout moment, et consulter le journal\ndes taches executees dans l'application.\n\n## 4. Vos gains\n\n- Votre machine est classee par categorie (consumer / prosumer /\n  high_end) selon son materiel : le tarif horaire depend de cette\n  categorie.\n- Gains credites a la duree reelle, visibles en temps reel dans\n  l'application (compteur \"Gains cumules\") et dans votre wallet.\n- Retraits possibles vers un compte bancaire apres verification\n  d'identite (KYC) - obligatoire pour tout paiement reel.\n\n## 5. Bonnes pratiques\n\n- Laissez la machine branchee et connectee pour maximiser les\n  creneaux de disponibilite.\n- Les jobs de calcul (encodage, rendu, simulation) utilisent le\n  GPU et le CPU : une bonne ventilation prolonge la duree de vie\n  du materiel.\n- En cas de probleme : le journal de l'application indique chaque\n  tache et son statut.\n\n## 6. Conditions\n\nLa participation suppose l'acceptation des CGU (disponibles avant\ntout paiement reel). Les gains sont des revenus a declarer selon\nvotre situation fiscale : ComputeShare fournit un releve annuel\ndes montants credites.\n"
+# Guide fournisseur de puissance - ComputeShare
+
+Ce guide s'adresse aux particuliers (fournisseurs) qui louent la
+puissance oisive de leur machine sur ComputeShare.
+
+## 1. Principe
+
+Vous installez l'application desktop ComputeShare. Quand vous
+n'utilisez pas votre machine (pas de souris ni de clavier pendant
+60 secondes), l'application :
+
+1. signale votre disponibilite a la plateforme ;
+2. recupere une tache d'un job client ;
+3. l'execute dans un sandbox isole ;
+4. remonte le resultat (verifie par empreinte SHA-256) ;
+5. credite votre wallet vendeur, a la duree reelle d'execution.
+
+Vous reprenez la main a tout moment : la tache en cours se termine,
+aucune nouvelle n'est prise tant que vous utilisez la machine.
+
+## 2. Installation
+
+Prerequis : Windows 10/11, une carte GPU NVIDIA, ~2 Go d'espace
+disque.
+
+1. Recuperer le jeton d'enrolement fourni pendant la beta (variable
+   `COMPUTERSHARE_NODE_TOKEN`).
+2. Lancer l'installation de l'application. Si Docker Desktop n'est
+   pas encore installe, l'installateur le lance automatiquement en
+   arriere-plan (une confirmation Windows peut etre demandee) : c'est
+   le moteur des jobs conteneur, les mieux payes.
+3. Lancer l'application, renseigner l'adresse de la plateforme
+   (gateway) puis "Demarrer le noeud".
+4. C'est tout. L'application tourne en arriere-plan.
+
+### Docker Desktop (jobs conteneur et GPU)
+
+- Sans Docker : le noeud reste utilisable pour les jobs allowlist
+  (commandes simples), mais ne recoit pas de jobs conteneur.
+- Avec Docker : le noeud recoit aussi les jobs conteneur. Si le PC a
+  un GPU NVIDIA a jour, l'application verifie au demarrage que le
+  GPU est accessible depuis les conteneurs ; le noeud est alors
+  marque "GPU pret" et recoit les jobs GPU (factures au tarif GPU,
+  plus eleve).
+- Si Docker vient d'etre installe, relancez l'application une fois
+  qu'il est demarre (icone de baleine fixe dans la barre des taches).
+
+Verif rapide (invite PowerShell) que le GPU passe dans les
+conteneurs :
+
+```
+docker run --rm --gpus all alpine true
+```
+
+Pas d'erreur = tout est pret.
+
+## 3. Securite : ce que la plateforme peut (et ne peut pas) faire
+
+L'execution est confinee dans un sandbox :
+
+- uniquement les programmes autorises (allowlist) ;
+- pas d'acces reseau pendant l'execution ;
+- repertoire de travail temporaire, efface ensuite ;
+- pas d'acces a vos fichiers personnels ;
+- timeout d'execution maximal.
+
+Vous pouvez arreter le noeud a tout moment, et consulter le journal
+des taches executees dans l'application.
+
+## 4. Vos gains
+
+- Votre machine est classee par categorie (consumer / prosumer /
+  high_end) selon son materiel : le tarif horaire depend de cette
+  categorie.
+- Gains credites a la duree reelle, visibles en temps reel dans
+  l'application (compteur "Gains cumules") et dans votre wallet.
+- Retraits possibles vers un compte bancaire apres verification
+  d'identite (KYC) - obligatoire pour tout paiement reel.
+
+## 5. Bonnes pratiques
+
+- Laissez la machine branchee et connectee pour maximiser les
+  creneaux de disponibilite.
+- Les jobs de calcul (encodage, rendu, simulation) utilisent le
+  GPU et le CPU : une bonne ventilation prolonge la duree de vie
+  du materiel.
+- En cas de probleme : le journal de l'application indique chaque
+  tache et son statut.
+
+## 6. Conditions
+
+La participation suppose l'acceptation des CGU (disponibles avant
+tout paiement reel). Les gains sont des revenus a declarer selon
+votre situation fiscale : ComputeShare fournit un releve annuel
+des montants credites.
+
