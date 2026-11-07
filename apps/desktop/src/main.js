@@ -24,14 +24,21 @@
     if (!st.logged_in) {
       // ---------- ECRAN CONNEXION ----------
       app.innerHTML = `
-        <h1>ComputeShare${ver ? ' <span style="font-size:13px;color:#94a3b8">v' + esc(ver) + '</span>' : ""}</h1>
-        <p>Connectez-vous avec votre compte fournisseur pour proposer la puissance de votre machine.</p>
-        <div class="cs-card" style="max-width:420px">
+        <div class="top">
+          <div class="brand">
+            <div class="logo">CS</div>
+            <div>
+              <h1>ComputeShare${ver ? ' <span style="font-size:13px;color:#8b98b8">v' + esc(ver) + '</span>' : ""}</h1>
+              <div class="sub">Proposez la puissance de votre machine.</div>
+            </div>
+          </div>
+        </div>
+        <div class="cs-card" style="max-width:430px">
           <label>E-mail</label><br>
           <input id="email" type="email" size="28" value="${esc(st.email)}" placeholder="vous@exemple.fr" autofocus><br>
           <label>Mot de passe</label><br>
           <input id="password" type="password" size="28"><br><br>
-          <button id="login">Se connecter</button>
+          <button id="login" class="primary">Se connecter</button>
           <span id="loginmsg" style="margin-left:10px"></span>
         </div>
         <p style="margin-top:14px">Pas encore de compte fournisseur ? <a href="#" id="signup">Créer un compte sur computeshare.fr</a></p>
@@ -74,32 +81,42 @@
     try { auto = await inv("plugin:autostart|is_enabled"); } catch (e) { auto = false; }
 
     app.innerHTML = `
-      <h1>ComputeShare <span style="font-size:13px;color:#94a3b8">— ${esc(st.email)} (${esc(st.node_id)})${ver ? " — v" + esc(ver) : ""}</span></h1>
-      <p>${esc(hw.gpu_model)} (${esc(hw.gpu_category)}) — ${hw.cpu_cores} cœurs — ${hw.ram_gb} Go RAM</p>
-      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:16px">
-        <div class="cs-stat"><div class="cs-stat-label">Gains cumulés</div>
-          <div class="cs-stat-value" id="earn">0.0000 EUR</div></div>
-        <div class="cs-stat"><div class="cs-stat-label">Charge GPU</div>
+      <div class="top">
+        <div class="brand">
+          <div class="logo">CS</div>
+          <div>
+            <h1>ComputeShare</h1>
+            <div class="sub">${esc(st.email)} (${esc(st.node_id)})${ver ? " — v" + esc(ver) : ""}</div>
+          </div>
+        </div>
+        <span class="pill" id="pill"><span class="dot"></span><span id="pilltxt">...</span></span>
+      </div>
+      <p class="hw">${esc(hw.gpu_model)} (${esc(hw.gpu_category)}) — ${hw.cpu_cores} cœurs — ${hw.ram_gb} Go RAM</p>
+      <div class="stats">
+        <div class="cs-stat"><div class="cs-stat-label">&#128176; Gains cumulés</div>
+          <div class="cs-stat-value money" id="earn">0.0000 EUR</div></div>
+        <div class="cs-stat"><div class="cs-stat-label">&#9889; Charge GPU</div>
           <div class="cs-stat-value" id="load">0 %</div></div>
-        <div class="cs-stat"><div class="cs-stat-label">Température GPU</div>
+        <div class="cs-stat"><div class="cs-stat-label">&#127777; Température GPU</div>
           <div class="cs-stat-value" id="temp">0 C</div></div>
-        <div class="cs-stat"><div class="cs-stat-label">Statut minage</div>
+        <div class="cs-stat"><div class="cs-stat-label">&#9679; Statut minage</div>
           <div class="cs-stat-value" id="mine">PAUSE</div></div>
       </div>
-      <p id="state" style="margin-top:16px">...</p>
-      <div class="cs-card" style="margin-top:10px;max-width:640px">
-        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-          <button id="availbtn" style="font-weight:bold">...</button>
-          <span id="availmsg" style="font-size:13px;color:#94a3b8"></span>
+      <p id="state" class="state">...</p>
+      <div class="cs-card card-wide">
+        <div class="avail-row">
+          <button id="availbtn" class="ok">...</button>
+          <span id="availmsg"></span>
         </div>
-        <canvas id="actgraph" width="620" height="140" style="margin-top:12px;width:100%;max-width:620px;background:#0f172a;border-radius:8px"></canvas>
-        <div style="margin-top:6px;font-size:12px;color:#94a3b8">
-          <span style="color:#60a5fa">&#9644; CPU</span> &nbsp;
-          <span style="color:#4ade80">&#9644; GPU</span> &nbsp;
-          <span style="color:#f59e0b">&#9644; ComputeShare au travail</span> &nbsp; (1 derniere heure)
+        <canvas id="actgraph" width="640" height="150"></canvas>
+        <div class="legend">
+          <span class="chip"><span class="sw" style="background:#60a5fa"></span>CPU</span>
+          <span class="chip"><span class="sw" style="background:#4ade80"></span>GPU</span>
+          <span class="chip"><span class="sw" style="background:rgba(245,158,11,.45)"></span>ComputeShare au travail</span>
+          <span class="chip">1 dernière heure</span>
         </div>
       </div>
-      <div class="cs-card" style="margin-top:10px;max-width:640px">
+      <div class="cs-card card-wide">
         <label><input type="checkbox" id="autostart" ${auto ? "checked" : ""}> Lancer ComputeShare au démarrage de Windows</label>
         <span id="autoerr" style="color:#f87171;margin-left:8px"></span>
         <div style="margin-top:12px">
@@ -132,8 +149,9 @@
       const b = e.target;
       if (b.dataset.armed !== "1") {
         b.dataset.armed = "1";
+        b.className = "danger";
         b.textContent = "Confirmer la déconnexion";
-        setTimeout(() => { b.dataset.armed = ""; b.textContent = "Se déconnecter"; }, 4000);
+        setTimeout(() => { b.dataset.armed = ""; b.className = ""; b.textContent = "Se déconnecter"; }, 4000);
         return;
       }
       await inv("logout");
@@ -203,8 +221,7 @@
     const availBtn = document.querySelector("#availbtn");
     const renderAvailBtn = () => {
       availBtn.textContent = manualOn ? "\u23F8 Mettre en pause" : "\u25B6 Remettre disponible";
-      availBtn.style.background = manualOn ? "#1e293b" : "#166534";
-      availBtn.style.color = manualOn ? "#e2e8f0" : "#ffffff";
+      availBtn.className = manualOn ? "ok" : "primary";
     };
     renderAvailBtn();
     availBtn.onclick = async () => {
@@ -221,25 +238,70 @@
       const g = cv.getContext("2d");
       const W = cv.width, H = cv.height;
       g.clearRect(0, 0, W, H);
-      g.strokeStyle = "#1e293b";
+      // Grille horizontale.
+      g.strokeStyle = "rgba(148,163,184,0.12)";
       g.lineWidth = 1;
       for (let y = 0; y <= 4; y++) {
         const py = Math.round(y * H / 4) + 0.5;
         g.beginPath(); g.moveTo(0, py); g.lineTo(W, py); g.stroke();
       }
       const s = act.samples || [];
+      // Pastille d'etat de l'entete + message de disponibilite.
+      const pill = document.querySelector("#pill");
+      const pilltxt = document.querySelector("#pilltxt");
+      const msg = document.querySelector("#availmsg");
+      const c = Math.round(act.cpu), gp = act.gpu;
+      if (!act.manual_on) {
+        if (pill) pill.className = "pill off";
+        if (pilltxt) pilltxt.textContent = "En pause (manuel)";
+        if (msg) msg.textContent = "En pause : le noeud ne prend aucun travail (bouton manuel).";
+      } else if (act.available) {
+        if (pill) pill.className = "pill on";
+        if (pilltxt) pilltxt.textContent = "Disponible";
+        if (msg) msg.textContent = "Disponible : accepte du travail (CPU " + c + "% / seuil " + Math.round(act.cpu_max) + "%, GPU " + gp + "% / seuil " + act.gpu_max + "%).";
+      } else {
+        if (pill) pill.className = "pill wait";
+        if (pilltxt) pilltxt.textContent = "En attente";
+        if (msg) msg.textContent = "En attente : charge trop elevee (CPU " + c + "% / seuil " + Math.round(act.cpu_max) + "%, GPU " + gp + "% / seuil " + act.gpu_max + "%).";
+      }
       if (!s.length) return;
       const step = W / Math.max(s.length - 1, 1);
       // Fond orange sur les periodes ou un chunk tournait.
-      g.fillStyle = "rgba(245,158,11,0.18)";
+      g.fillStyle = "rgba(245,158,11,0.14)";
       for (let i = 0; i < s.length; i++) {
         if (s[i].working) {
           g.fillRect(Math.round(i * step) - step / 2, 0, Math.max(step, 1.5), H);
         }
       }
-      const line = (vals, color) => {
+      // Courbe remplie + ligne, avec seuil en pointilles.
+      const series = (vals, color, max) => {
+        // seuil (pointilles) au niveau du max autorise.
         g.strokeStyle = color;
-        g.lineWidth = 1.5;
+        g.globalAlpha = 0.35;
+        g.setLineDash([4, 5]);
+        g.lineWidth = 1;
+        const ty = H - (Math.min(max, 100) / 100) * (H - 2) - 1;
+        g.beginPath(); g.moveTo(0, ty); g.lineTo(W, ty); g.stroke();
+        g.setLineDash([]);
+        g.globalAlpha = 1;
+        // aire sous la courbe.
+        g.beginPath();
+        for (let i = 0; i < s.length; i++) {
+          const px = i * step;
+          const py = H - (Math.min(vals(s[i]), 100) / 100) * (H - 2) - 1;
+          if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+        }
+        g.lineTo(W, H); g.lineTo(0, H); g.closePath();
+        const grad = g.createLinearGradient(0, 0, 0, H);
+        grad.addColorStop(0, color.replace("0.9", "0.28"));
+        grad.addColorStop(1, "rgba(0,0,0,0)");
+        g.globalAlpha = 1;
+        g.fillStyle = grad;
+        g.fill();
+        // ligne par-dessus.
+        g.globalAlpha = 1;
+        g.strokeStyle = color;
+        g.lineWidth = 1.6;
         g.beginPath();
         for (let i = 0; i < s.length; i++) {
           const px = i * step;
@@ -248,18 +310,8 @@
         }
         g.stroke();
       };
-      line((x) => x.cpu, "#60a5fa");
-      if (act.gpu_present) line((x) => x.gpu, "#4ade80");
-      // Message de disponibilite.
-      const msg = document.querySelector("#availmsg");
-      const c = Math.round(act.cpu), gp = act.gpu;
-      if (!act.manual_on) {
-        msg.textContent = "En pause : le noeud ne prend aucun travail (bouton manuel).";
-      } else if (act.available) {
-        msg.textContent = "Disponible : accepte du travail (CPU " + c + "% / seuil " + Math.round(act.cpu_max) + "%, GPU " + gp + "% / seuil " + act.gpu_max + "%).";
-      } else {
-        msg.textContent = "En attente : charge trop elevee (CPU " + c + "% / seuil " + Math.round(act.cpu_max) + "%, GPU " + gp + "% / seuil " + act.gpu_max + "%).";
-      }
+      series((x) => x.cpu, "rgba(96,165,250,0.9)", act.cpu_max);
+      if (act.gpu_present) series((x) => x.gpu, "rgba(74,222,128,0.9)", act.gpu_max);
     };
 
     async function refresh() {
@@ -268,7 +320,9 @@
         document.querySelector("#earn").textContent = s.earnings_eur.toFixed(4) + " EUR";
         document.querySelector("#load").textContent = s.gpu_load + " %";
         document.querySelector("#temp").textContent = s.gpu_temp_c + " C";
-        document.querySelector("#mine").textContent = s.should_mine ? "ACTIF" : "PAUSE";
+        const mine = document.querySelector("#mine");
+        mine.textContent = s.should_mine ? "ACTIF" : "PAUSE";
+        mine.className = "cs-stat-value " + (s.should_mine ? "on" : "off");
         document.querySelector("#state").textContent =
           "CPU " + s.cpu_load.toFixed(0) + " % — uptime " + s.uptime_secs + " s";
         const n = await inv("node_status");

@@ -5,17 +5,93 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ComputeShare</title>
 <style>
- body{font-family:Segoe UI,system-ui,sans-serif;background:#0f172a;color:#e2e8f0;margin:24px}
- h1{font-size:22px}
- .cs-stat{background:#1e293b;border-radius:12px;padding:12px 16px;min-width:140px}
- .cs-stat-label{font-size:12px;color:#94a3b8}
- .cs-stat-value{font-size:20px;font-weight:600;margin-top:4px}
- input{padding:8px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0}
- button{padding:8px 16px;border:0;border-radius:8px;background:#22c55e;color:#04220f;font-weight:600;cursor:pointer}
- label{color:#94a3b8;font-size:13px}
- .cs-card{background:#1e293b;border-radius:12px;padding:14px 16px;display:inline-block}
- a{color:#7dd3fc}
- h1{font-size:22px}
+ :root{
+   --bg1:#0b1224; --bg2:#0d1730; --card:#141c33; --card2:#182242;
+   --line:#243056; --txt:#e6ebf5; --muted:#8b98b8;
+   --acc:#818cf8; --cyan:#22d3ee; --green:#34d399; --amber:#fbbf24;
+   --red:#f87171;
+ }
+ *{box-sizing:border-box}
+ body{
+   font-family:"Segoe UI Variable","Segoe UI",system-ui,sans-serif;
+   background:radial-gradient(1200px 700px at 85% -10%, #1b2a55 0%, transparent 55%),
+              linear-gradient(160deg,var(--bg1),var(--bg2) 60%,#0e1a38);
+   color:var(--txt);margin:0;padding:26px 30px;min-height:100vh;
+ }
+ /* ---------- entete ---------- */
+ .top{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
+ .brand{display:flex;align-items:center;gap:14px}
+ .logo{
+   width:44px;height:44px;border-radius:13px;flex:none;
+   background:linear-gradient(135deg,var(--acc),var(--cyan));
+   display:flex;align-items:center;justify-content:center;
+   color:#fff;font-weight:800;font-size:17px;letter-spacing:-1px;
+   box-shadow:0 6px 18px rgba(99,102,241,.35);
+ }
+ h1{font-size:23px;margin:0;letter-spacing:-.3px}
+ .sub{font-size:12.5px;color:var(--muted);margin-top:2px}
+ .pill{
+   display:inline-flex;align-items:center;gap:7px;
+   font-size:12.5px;font-weight:600;padding:6px 14px;border-radius:999px;
+   border:1px solid var(--line);background:rgba(20,28,51,.7)
+ }
+ .pill .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+ .pill.on .dot{background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse 2s infinite}
+ .pill.wait .dot{background:var(--amber)}
+ .pill.off .dot{background:var(--muted)}
+ @keyframes pulse{50%{opacity:.4}}
+ /* ---------- cartes & stats ---------- */
+ .hw{color:var(--muted);font-size:13.5px;margin:14px 2px 18px}
+ .stats{display:flex;gap:14px;flex-wrap:wrap}
+ .cs-stat{
+   background:linear-gradient(180deg,var(--card2),var(--card));
+   border:1px solid var(--line);border-radius:16px;
+   padding:14px 18px;min-width:150px;
+   box-shadow:0 8px 24px rgba(2,6,20,.35);
+ }
+ .cs-stat-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+ .cs-stat-value{font-size:22px;font-weight:700;margin-top:6px;font-variant-numeric:tabular-nums}
+ .cs-stat-value.money{color:var(--green)}
+ .cs-stat-value.on{color:var(--green)}
+ .cs-stat-value.off{color:var(--amber)}
+ .cs-card{
+   background:linear-gradient(180deg,var(--card2),var(--card));
+   border:1px solid var(--line);border-radius:16px;padding:18px 20px;
+   display:inline-block;box-shadow:0 8px 24px rgba(2,6,20,.35);margin-top:14px
+ }
+ .card-wide{max-width:680px}
+ /* ---------- boutons & entrees ---------- */
+ input{padding:9px 12px;border-radius:10px;border:1px solid var(--line);
+   background:#0d1528;color:var(--txt);outline:none}
+ input:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(129,140,248,.25)}
+ button{
+   padding:9px 18px;border:0;border-radius:10px;font-weight:600;font-size:13.5px;
+   cursor:pointer;color:var(--txt);background:#20294a;
+   border:1px solid #2b3866;transition:transform .12s,box-shadow .12s
+ }
+ button:hover{transform:translateY(-1px)}
+ button:active{transform:translateY(0)}
+ button.primary{
+   background:linear-gradient(135deg,var(--acc),var(--cyan));border:0;color:#fff;
+   box-shadow:0 4px 14px rgba(99,102,241,.35)
+ }
+ button.ok{background:linear-gradient(135deg,#059669,#34d399);border:0;color:#03241a;
+   box-shadow:0 4px 14px rgba(52,211,153,.3)}
+ button.danger{background:linear-gradient(135deg,#b91c1c,#f87171);border:0;color:#fff}
+ label{color:var(--muted);font-size:13px}
+ input[type=checkbox]{accent-color:var(--acc);width:15px;height:15px}
+ a{color:var(--cyan)}
+ .state{color:var(--muted);font-size:13.5px;margin:16px 2px}
+ /* ---------- zone disponibilite ---------- */
+ .avail-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+ #availmsg{font-size:13.5px;color:var(--muted)}
+ #actgraph{margin-top:14px;width:100%;max-width:640px;background:#0b1224;
+   border-radius:12px;border:1px solid #1a2445}
+ .legend{margin-top:10px;font-size:12px;color:var(--muted);display:flex;gap:14px;flex-wrap:wrap}
+ .legend .chip{display:inline-flex;align-items:center;gap:6px}
+ .legend .sw{width:16px;height:9px;border-radius:4px;display:inline-block}
+ .muted{color:var(--muted)}
+ .err{color:var(--red)}
 </style>
 </head>
 <body>
