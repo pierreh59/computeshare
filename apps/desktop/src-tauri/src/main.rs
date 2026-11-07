@@ -6,6 +6,7 @@
 mod hw;
 mod bench;
 mod idle;
+mod availability;
 mod sandbox;
 mod container;
 mod jobs;
@@ -33,6 +34,8 @@ fn main() {
             live::get_live_stats,
             node::start_node,
             node::node_status,
+            availability::set_available,
+            availability::get_activity,
             auth::auth_status,
             auth::login,
             auth::logout,

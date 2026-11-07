@@ -54,7 +54,9 @@ fn wallet_earnings() -> f64 {
 
 #[tauri::command]
 pub fn get_live_stats() -> LiveStats {
-    let idle = crate::idle::get_idle_status();
+    // Sprint 21 : le statut "should_mine" vient de la disponibilite
+    // (bouton On/Off + charge CPU/GPU), plus de regle d'inactivite.
+    let act = crate::availability::get_activity();
 
     let (gpu_load, gpu_temp) = match nvml_wrapper::Nvml::init() {
         Ok(nvml) => match nvml.device_by_index(0) {
@@ -70,8 +72,8 @@ pub fn get_live_stats() -> LiveStats {
     LiveStats {
         gpu_load,
         gpu_temp_c: gpu_temp,
-        cpu_load: idle.cpu_load,
-        should_mine: idle.should_mine,
+        cpu_load: act.cpu,
+        should_mine: act.available,
         earnings_eur: wallet_earnings(),
         uptime_secs: boot().elapsed().as_secs(),
     }
