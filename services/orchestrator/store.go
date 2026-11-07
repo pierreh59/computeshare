@@ -489,7 +489,7 @@ func (s *Store) LoadAll(reg *Registry, pricing *Pricing, chunker *Chunker, orgs 
 				}
 				chunker.Restore(&Chunk{
 					ID: id, JobID: jobID, NodeID: nodeID,
-					OrgID:          orgID,
+					OrgID:   orgID,
 					Command: cmd, Args: args,
 					ExpectedOutput:  output,
 					TimeoutSecs:     uint64(timeout),
@@ -655,4 +655,94 @@ func (s *Store) LoadUsers(a *AccountStore) {
 				siretVerified, siretCheckedAt)
 		}
 	}
+}
+
+// ------------------------------------------------------------------
+// Sprint 24 : observabilite persistee
+// ------------------------------------------------------------------
+
+// SaveDashEvent ecrit une ligne du journal admin en base (append-only).
+// Appele en goroutine par dashLog : les erreurs sont seulement loggees.
+func (s *Store) SaveDashEvent(at time.Time, typ, msg string) {
+	if !s.enabled() {
+		return
+	}
+	if _, err := s.db.Exec(`INSERT INTO dash_events (at, type, msg)
+		VALUES ($1,$2,$3)`, at, typ, msg); err != nil {
+		log.Printf("store.SaveDashEvent: %v", err)
+	}
+}
+
+// LoadDashEvents relit les n derniers evenements persistes (plus
+// recents d'abord). Retourne nil si la persistance est inactive.
+func (s *Store) LoadDashEvents(n int) []DashEvent {
+	if !s.enabled() {
+		return nil
+	}
+	rows, err := s.db.Query(`SELECT at, type, msg FROM dash_events
+		ORDER BY at DESC, id DESC LIMIT $1`, n)
+	if err != nil {
+		log.Printf("store.LoadDashEvents: %v", err)
+		return nil
+	}
+	defer rows.Close()
+	out := make([]DashEvent, 0, n)
+	for rows.Next() {
+		var e DashEvent
+		if rows.Scan(&e.At, &e.Type, &e.Msg) == nil {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// OrgJobRow : resume d'un job pour la console client, lu depuis
+// l'historique persiste des chunks (runtime_chunks).
+type OrgJobRow struct {
+	JobID     string
+	TaskCount int
+	Statuses  map[string]int
+	UpdatedAt time.Time
+}
+
+// LoadOrgJobs resume les jobs persistes d'une organisation, les plus
+// recents d'abord. Retourne nil si la persistance est inactive.
+func (s *Store) LoadOrgJobs(orgID string, limit int) []OrgJobRow {
+	if !s.enabled() {
+		return nil
+	}
+	q := `SELECT job_id, COUNT(*),
+		COUNT(*) FILTER (WHERE status='queued'),
+		COUNT(*) FILTER (WHERE status='running'),
+		COUNT(*) FILTER (WHERE status='done'),
+		COUNT(*) FILTER (WHERE status='failed'),
+		COUNT(*) FILTER (WHERE status='canceled'),
+		MAX(updated_at)
+		FROM runtime_chunks WHERE org_id=$1
+		GROUP BY job_id ORDER BY MAX(updated_at) DESC`
+	args := []interface{}{orgID}
+	if limit > 0 {
+		q += ` LIMIT $2`
+		args = append(args, limit)
+	}
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		log.Printf("store.LoadOrgJobs: %v", err)
+		return nil
+	}
+	defer rows.Close()
+	out := []OrgJobRow{}
+	for rows.Next() {
+		var r OrgJobRow
+		var queued, running, doneN, failedN, canceledN int
+		if rows.Scan(&r.JobID, &r.TaskCount,
+			&queued, &running, &doneN, &failedN, &canceledN, &r.UpdatedAt) == nil {
+			r.Statuses = map[string]int{
+				"queued": queued, "running": running, "done": doneN,
+				"failed": failedN, "canceled": canceledN,
+			}
+			out = append(out, r)
+		}
+	}
+	return out
 }

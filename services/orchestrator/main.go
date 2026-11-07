@@ -12,7 +12,7 @@ import (
 
 // orchestratorVersion : version de l'orchestrateur, affichee sur le
 // dashboard admin et dans /healthz. A incrementer a chaque sprint.
-const orchestratorVersion = "v0.19.1"
+const orchestratorVersion = "v0.19.2"
 
 func main() {
 	port := os.Getenv("PORT")
@@ -33,6 +33,8 @@ func main() {
 	accounts := NewAccountStore(store, orgs)
 	orgs.SetAccountAuth(accounts.Authenticate)
 	nodeAuth := NewNodeAuth(accounts)
+	// Sprint 24 : le journal du dashboard admin est persiste en base.
+	setDashStore(store)
 	store.LoadAll(registry, pricing, chunker, orgs)
 	store.LoadUsers(accounts)
 	store.LoadWallet(wallet)

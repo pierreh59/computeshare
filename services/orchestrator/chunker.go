@@ -409,6 +409,28 @@ func (c *Chunker) OrgJobs(orgID string, limit int) []map[string]interface{} {
 		// Les plus recents a la fin : on garde la fin de la liste.
 		out = out[len(out)-limit:]
 	}
+	// Sprint 24 : l'historique persiste (runtime_chunks) complete la
+	// liste. Les jobs vivants en memoire prennent le pas sur la base,
+	// les jobs termines d'avant le dernier redemarrage restent visibles.
+	live := map[string]bool{}
+	for _, j := range out {
+		live[j["job_id"].(string)] = true
+	}
+	dbLimit := limit
+	if dbLimit <= 0 {
+		dbLimit = 100
+	}
+	for _, r := range c.store.LoadOrgJobs(orgID, dbLimit) {
+		if live[r.JobID] {
+			continue
+		}
+		out = append(out, map[string]interface{}{
+			"job_id":     r.JobID,
+			"task_count": r.TaskCount,
+			"chunks":     r.Statuses,
+			"updated_at": r.UpdatedAt,
+		})
+	}
 	return out
 }
 

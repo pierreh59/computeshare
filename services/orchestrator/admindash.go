@@ -44,14 +44,29 @@ type dashEventLog struct {
 
 var dashEvents = &dashEventLog{}
 
+// dashStore : store de persistance du journal (nil en mode memoire).
+// Sprint 24 : les evenements sont aussi ecrits en base pour survivre
+// aux redemarrages.
+var dashStore *Store
+
+// setDashStore branche la persistance du journal (au demarrage).
+func setDashStore(s *Store) { dashStore = s }
+
 // dashLog ajoute un evenement au journal (appele depuis toute la
 // plateforme : hub, chunker, accounts, actions admin, fraude).
 func dashLog(typ, msg string) {
+	now := time.Now()
 	dashEvents.mu.Lock()
-	defer dashEvents.mu.Unlock()
-	dashEvents.evts = append(dashEvents.evts, DashEvent{At: time.Now(), Type: typ, Msg: msg})
+	dashEvents.evts = append(dashEvents.evts, DashEvent{At: now, Type: typ, Msg: msg})
 	if len(dashEvents.evts) > 300 {
 		dashEvents.evts = dashEvents.evts[len(dashEvents.evts)-300:]
+	}
+	dashEvents.mu.Unlock()
+	// Sprint 24 : ecriture en base asynchrone (best-effort, jamais
+	// bloquante pour l'appelant ; le ring buffer reste la source
+	// immediate).
+	if s := dashStore; s != nil {
+		go s.SaveDashEvent(now, typ, msg)
 	}
 }
 
@@ -152,22 +167,22 @@ type DashWork struct {
 
 // DashNode : carte d'un noeud pour le tableau de bord.
 type DashNode struct {
-	ID          string    `json:"id"`
-	OwnerEmail  string    `json:"owner_email"`
-	GPUModel    string    `json:"gpu_model"`
-	Category    string    `json:"gpu_category"`
-	Zone        string    `json:"zone"`
-	Status      string    `json:"status"`
-	Trust       float64   `json:"trust"`
-	Online      bool      `json:"online"`
-	LastSeen    time.Time `json:"last_seen"`
-	IP          string    `json:"ip"`
-	Country     string    `json:"country"`
-	City        string    `json:"city"`
-	Lat         float64   `json:"lat"`
-	Lon         float64   `json:"lon"`
-	Work        []DashWork `json:"work"`
-	WSL2Ready   bool       `json:"wsl2_ready"`
+	ID         string     `json:"id"`
+	OwnerEmail string     `json:"owner_email"`
+	GPUModel   string     `json:"gpu_model"`
+	Category   string     `json:"gpu_category"`
+	Zone       string     `json:"zone"`
+	Status     string     `json:"status"`
+	Trust      float64    `json:"trust"`
+	Online     bool       `json:"online"`
+	LastSeen   time.Time  `json:"last_seen"`
+	IP         string     `json:"ip"`
+	Country    string     `json:"country"`
+	City       string     `json:"city"`
+	Lat        float64    `json:"lat"`
+	Lon        float64    `json:"lon"`
+	Work       []DashWork `json:"work"`
+	WSL2Ready  bool       `json:"wsl2_ready"`
 }
 
 // DashJob : un job actif (au moins un chunk non termine).
@@ -294,10 +309,16 @@ func adminDashData(reg *Registry, c *Chunker, f *Fraud, accounts *AccountStore, 
 			out = append(out, d)
 		}
 		done, failed, payoutEur := c.DashTotals()
+		// Sprint 24 : journal persiste en base si disponible, sinon le
+		// ring buffer memoire (mode sans BDD).
+		events := dashRecent(60)
+		if dbEvents := dashStore.LoadDashEvents(60); dbEvents != nil {
+			events = dbEvents
+		}
 		writeJSON(w, map[string]interface{}{
 			"nodes":  out,
 			"jobs":   dashJobs(c, orgs),
-			"events": dashRecent(60),
+			"events": events,
 			"fraud":  f.Alerts(),
 			"stats": map[string]interface{}{
 				"online":        online,
