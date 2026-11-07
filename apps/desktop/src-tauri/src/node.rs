@@ -101,30 +101,42 @@ fn node_loop(gateway: String, node_id: String) {
     })
     .to_string();
 
-    loop {
-        // 1. Register : idempotent, met a jour LastSeen = heartbeat.
-        match crate::http::post_json(&gateway, "/register", &register_body) {
-            Some(r) if r.status == 200 => {
-                // Un register reussi efface l'erreur precedente : sans
-                // cela, "gateway injoignable" restait affiche meme apres
-                // une reconnexion reussie.
-                status_cell().lock().unwrap().last_error.clear();
+    // Sprint 22 : le register (heartbeat) tourne dans SON PROPRE thread.
+    // Avant, la boucle etait bloquee pendant l'execution d'un chunk : un
+    // job conteneur de 5 min sans heartbeat faisait marquer le noeud
+    // "hors ligne" par le serveur, avec risque de re-attribution du job
+    // a un autre noeud (vu en vrai le 7 nov., job-gros-1).
+    {
+        let gw = gateway.clone();
+        let body = register_body.clone();
+        std::thread::spawn(move || loop {
+            // Register : idempotent, met a jour LastSeen = heartbeat.
+            match crate::http::post_json(&gw, "/register", &body) {
+                Some(r) if r.status == 200 => {
+                    // Un register reussi efface l'erreur precedente : sans
+                    // cela, "gateway injoignable" restait affiche meme apres
+                    // une reconnexion reussie.
+                    status_cell().lock().unwrap().last_error.clear();
+                }
+                Some(r) if r.status == 401 || r.status == 403 => set_error(
+                    "jeton de noeud refuse : reconnectez-vous avec votre compte (bouton Se deconnecter puis connexion)",
+                ),
+                Some(r) => set_error(&format!("register: HTTP {}", r.status)),
+                None => set_error("gateway injoignable"),
             }
-            Some(r) if r.status == 401 || r.status == 403 => set_error(
-                "jeton de noeud refuse : reconnectez-vous avec votre compte (bouton Se deconnecter puis connexion)",
-            ),
-            Some(r) => set_error(&format!("register: HTTP {}", r.status)),
-            None => set_error("gateway injoignable"),
-        }
+            std::thread::sleep(Duration::from_secs(5));
+        });
+    }
 
-        // 2. Claim un chunk seulement si le noeud est disponible :
+    loop {
+        // Claim un chunk seulement si le noeud est disponible :
         // bouton On/Off + charge CPU/GPU sous les seuils (sprint 21).
         crate::availability::ensure_sampler();
         if crate::availability::available() {
             if let Some(r) = crate::http::get(&gateway, &format!("/chunks?node_id={}", node_id)) {
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&r.body) {
                     if v.is_object() {
-                        run_and_report(&gateway, &v);
+                        run_and_report(&gateway, &node_id, &v);
                     }
                 }
             }
@@ -134,12 +146,16 @@ fn node_loop(gateway: String, node_id: String) {
     }
 }
 
-fn run_and_report(gateway: &str, chunk: &serde_json::Value) {
+fn run_and_report(gateway: &str, node_id: &str, chunk: &serde_json::Value) {
     crate::availability::set_working(true);
     let res = run_chunk_gateway(gateway, chunk);
     crate::availability::set_working(false);
     let payload = serde_json::json!({
         "chunk_id": res.chunk_id,
+        // Sprint 22 : le rapport precise QUI a execute : le paiement
+        // doit aller au noeud qui a reellement travaille, meme si le
+        // serveur a re-attribue le chunk entre-temps.
+        "node_id": node_id,
         "outcome": res.outcome,
         "sha256": res.output_sha256.unwrap_or_default(),
         "duration_secs": (res.duration_ms / 1000) as u64,

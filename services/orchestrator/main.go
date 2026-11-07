@@ -12,7 +12,7 @@ import (
 
 // orchestratorVersion : version de l'orchestrateur, affichee sur le
 // dashboard admin et dans /healthz. A incrementer a chaque sprint.
-const orchestratorVersion = "v0.18.0"
+const orchestratorVersion = "v0.19.0"
 
 func main() {
 	port := os.Getenv("PORT")
@@ -82,12 +82,12 @@ func main() {
 	// d'enrolement (en-tete X-Node-Token, cf. nodeauth.go).
 	http.HandleFunc("/register", nodeAuth.withNodeToken(func(w http.ResponseWriter, r *http.Request, sellerID string) {
 		var msg struct {
-			NodeID              string `json:"node_id"`
-			GPUModel            string `json:"gpu_model"`
-			GPUCategory         string `json:"gpu_category"`
-			Zone                string `json:"zone"`
-			MachineFingerprint  string `json:"machine_fingerprint"`
-			WSL2Ready           bool   `json:"wsl2_ready"`
+			NodeID             string `json:"node_id"`
+			GPUModel           string `json:"gpu_model"`
+			GPUCategory        string `json:"gpu_category"`
+			Zone               string `json:"zone"`
+			MachineFingerprint string `json:"machine_fingerprint"`
+			WSL2Ready          bool   `json:"wsl2_ready"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&msg); err != nil || msg.NodeID == "" {
 			http.Error(w, "invalid register", http.StatusBadRequest)

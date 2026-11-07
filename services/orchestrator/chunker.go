@@ -37,10 +37,10 @@ type Job struct {
 
 // Chunk : une unite de travail assignee a un seul noeud.
 type Chunk struct {
-	ID             string   `json:"id"`
-	JobID          string   `json:"job_id"`
-	NodeID         string   `json:"node_id"`
-	Command        string   `json:"command"`
+	ID      string `json:"id"`
+	JobID   string `json:"job_id"`
+	NodeID  string `json:"node_id"`
+	Command string `json:"command"`
 	// Organisation cliente B2B proprietaire du chunk (vide pour les
 	// soumissions internes). Utilisee par le billing (LAI-32).
 	OrgID          string   `json:"-"`
@@ -52,9 +52,14 @@ type Chunk struct {
 	Attempts       int      `json:"attempts,omitempty"`
 	Zone           string   `json:"zone,omitempty"`
 	AssetIDs       []string `json:"asset_ids,omitempty"`
+	// Sprint 22 : heure de derniere mise en route (memoire seulement).
+	// Le re-scheduler ne redistribue plus un chunk tant que son timeout
+	// n'est pas expire, meme si le noeud parait hors ligne (vu en vrai :
+	// heartbeat bloque pendant un job conteneur de 5 min).
+	StartedAt time.Time `json:"-"`
 	// Sprint 18 (v2) : heritage du runtime conteneur du job.
-	Runtime        string   `json:"runtime,omitempty"`
-	Image          string   `json:"image,omitempty"`
+	Runtime string `json:"runtime,omitempty"`
+	Image   string `json:"image,omitempty"`
 	// LAI-51 : tarif gele a la livraison (EUR / GPU-heure).
 	PriceEurPerHour float64 `json:"price_eur_per_hour,omitempty"`
 	// Paiement calcule a la completion (EUR).
@@ -170,6 +175,7 @@ func (c *Chunker) NextFor(nodeID string) *Chunk {
 		if ch.NodeID == nodeID && ch.Status == "queued" {
 			ch.Status = "running"
 			ch.Attempts++
+			ch.StartedAt = time.Now()
 			ch.PriceEurPerHour = c.pricing.CurrentPrice(c.nodeCategory(nodeID))
 			c.store.SaveChunk(ch)
 			return ch
@@ -180,11 +186,23 @@ func (c *Chunker) NextFor(nodeID string) *Chunk {
 
 // Complete enregistre le resultat d'un chunk et calcule le paiement :
 // tarif gele x duree reelle. Jamais retroactif (ADR-006).
-func (c *Chunker) Complete(chunkID, outcome, sha string, durationSecs uint64) bool {
+// Sprint 22 : idempotent (un chunk deja termine ignore tout nouveau
+// rapport, pas de double paiement) et le paiement va au noeud qui
+// RAPPORTE (nodeID), pas au noeud theoretiquement assigne (en cas de
+// re-attribution pendant l'execution, l'ancien noeud doit etre paye).
+func (c *Chunker) Complete(chunkID, nodeID, outcome, sha string, durationSecs uint64) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, ch := range c.chunks {
 		if ch.ID == chunkID {
+			// Sprint 22 : rapport en double (re-attribution, doublon
+			// de chunk_result) -> ignore, pas de second versement.
+			if ch.Status == "done" || ch.Status == "failed" || ch.Status == "canceled" {
+				return false
+			}
+			if nodeID == "" {
+				nodeID = ch.NodeID
+			}
 			ch.DurationSecs = durationSecs
 			if outcome == "ok" {
 				ch.Status = "done"
@@ -194,6 +212,8 @@ func (c *Chunker) Complete(chunkID, outcome, sha string, durationSecs uint64) bo
 			} else {
 				ch.Status = "failed"
 			}
+			// Sprint 22 : le rapport vient du vrai executeur.
+			ch.NodeID = nodeID
 			// Sprint 17 : journal temps reel du dashboard admin.
 			if outcome == "ok" {
 				dashLog("chunk_done", fmt.Sprintf("%s termine par %s (%.0f s, verse %.6f EUR)",
@@ -225,12 +245,23 @@ func (c *Chunker) Complete(chunkID, outcome, sha string, durationSecs uint64) bo
 // rescheduleLoop (LAI-27) : toutes les 10 s, les chunks "running"
 // dont le noeud a disparu sont redistribues. Apres 3 tentatives,
 // le chunk passe en echec definitif.
+// Sprint 22 : on attend aussi l'expiration du timeout du chunk avant
+// de redistribuer (un job conteneur de 5 min avec le heartbeat bloque
+// etait redistribue au milieu de son execution).
 func (c *Chunker) rescheduleLoop() {
 	for range time.Tick(10 * time.Second) {
 		c.mu.Lock()
 		online := c.reg.OnlineNodes()
 		for _, ch := range c.chunks {
 			if ch.Status != "running" || c.reg.IsOnline(ch.NodeID) {
+				continue
+			}
+			// Sprint 22 : grace period = timeout du chunk (300 s min).
+			grace := ch.TimeoutSecs
+			if grace < 300 {
+				grace = 300
+			}
+			if time.Since(ch.StartedAt) < time.Duration(grace)*time.Second {
 				continue
 			}
 			if ch.Attempts >= maxChunkAttempts {
@@ -363,11 +394,14 @@ func nextChunk(c *Chunker) http.HandlerFunc {
 	}
 }
 
-// POST /chunk_result : le noeud signale {chunk_id, outcome, sha256, duration_secs}.
+// POST /chunk_result : le noeud signale {chunk_id, outcome, sha256,
+// duration_secs, node_id} (node_id depuis le sprint 22 : le paiement
+// va au noeud qui rapporte, pas a l'assigne theorique).
 func completeChunk(c *Chunker) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var res struct {
 			ChunkID      string `json:"chunk_id"`
+			NodeID       string `json:"node_id"`
 			Outcome      string `json:"outcome"`
 			SHA256       string `json:"sha256"`
 			DurationSecs uint64 `json:"duration_secs"`
@@ -376,7 +410,7 @@ func completeChunk(c *Chunker) http.HandlerFunc {
 			http.Error(w, "invalid result", http.StatusBadRequest)
 			return
 		}
-		ok := c.Complete(res.ChunkID, res.Outcome, res.SHA256, res.DurationSecs)
+		ok := c.Complete(res.ChunkID, res.NodeID, res.Outcome, res.SHA256, res.DurationSecs)
 		writeJSON(w, map[string]bool{"recorded": ok})
 	}
 }
