@@ -69,6 +69,9 @@ func freeBytes(dir string) int64 {
 func uploadResult(c *Chunker, store *Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		chunkID := r.Header.Get("X-Chunk-Id")
+		// Sprint 26b : tracer TOUTE tentative, meme refusee, pour
+		// diagnostiquer a distance (le noeud n'affiche pas l'erreur).
+		log.Printf("POST /results chunk=%s bytes=%d", chunkID, r.ContentLength)
 		if chunkID == "" {
 			http.Error(w, "X-Chunk-Id manquant", http.StatusBadRequest)
 			return
@@ -78,6 +81,7 @@ func uploadResult(c *Chunker, store *Store) http.HandlerFunc {
 		ch := c.ChunkByID(chunkID)
 		if ch != nil {
 			if ch.Status != "done" {
+				dashLog("result_upload", chunkID+" refuse : chunk non termine (409)")
 				http.Error(w, "chunk non termine", http.StatusConflict)
 				return
 			}
@@ -86,12 +90,14 @@ func uploadResult(c *Chunker, store *Store) http.HandlerFunc {
 		} else {
 			dbOrg, dbStatus, dbOut := store.ChunkFromDB(chunkID)
 			if dbStatus != "done" {
+				dashLog("result_upload", chunkID+" refuse : chunk inconnu ou non termine (404)")
 				http.Error(w, "chunk inconnu ou non termine", http.StatusNotFound)
 				return
 			}
 			orgID, fileName = dbOrg, dbOut
 		}
 		if r.ContentLength > maxResultBytes {
+			dashLog("result_upload", chunkID+" refuse : trop volumineux (413)")
 			http.Error(w, "fichier trop volumineux (max 5 Go)", http.StatusRequestEntityTooLarge)
 			return
 		}
@@ -100,6 +106,7 @@ func uploadResult(c *Chunker, store *Store) http.HandlerFunc {
 		if free := freeBytes(resultsDir()); free < maxResultBytes+resultFreeFloor {
 			dashLog("alerte", fmt.Sprintf("upload resultat REFUSE : espace disque insuffisant (%.1f Go libres)",
 				float64(free)/(1<<30)))
+			dashLog("result_upload", chunkID+" refuse : espace disque insuffisant (507)")
 			http.Error(w, "espace disque serveur insuffisant", http.StatusInsufficientStorage)
 			return
 		}

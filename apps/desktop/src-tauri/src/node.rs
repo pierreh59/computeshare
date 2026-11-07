@@ -230,7 +230,9 @@ fn run_and_report(gateway: &str, node_id: &str, chunk: &serde_json::Value) {
     let mut st = status_cell().lock().unwrap();
     if res.outcome == "ok" {
         st.chunks_done += 1;
-        st.last_error.clear();
+        // Sprint 26b : on n'efface PAS last_error ici : le message
+        // d'erreur d'upload (set_error ci-dessus) serait masque.
+        // Il est efface par un upload reussi (ligne ci-dessus).
     } else {
         st.chunks_failed += 1;
         st.last_error = format!("{}: {}", res.outcome, res.detail);
