@@ -91,7 +91,15 @@ pub fn post_json_bearer(bearer: &str, url: &str, path: &str, body: &str) -> Opti
 /// fichier. Le corps n'est pas de l'UTF-8 fiable : on ne passe
 /// surtout PAS par into_string(). Timeout eleve (asset jusqu'a
 /// 100 Mo). Le corps n'est ecrit que si HTTP 200.
-pub fn get_file(url: &str, path: &str, dest: &std::path::Path) -> Option<Response> {
+/// Sprint 33 : `progress` (optionnel) recoit (octets recus, taille
+/// totale) au fil du telechargement pour l'affichage en direct
+/// (taille totale 0 si le serveur n'envoie pas Content-Length).
+pub fn get_file(
+    url: &str,
+    path: &str,
+    dest: &std::path::Path,
+    progress: Option<&dyn Fn(u64, u64)>,
+) -> Option<Response> {
     let full = full_url(url, path);
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(std::time::Duration::from_secs(10))
@@ -108,9 +116,31 @@ pub fn get_file(url: &str, path: &str, dest: &std::path::Path) -> Option<Respons
     };
     let status = resp.status();
     if status == 200 {
+        // Sprint 33 : Content-Length pour afficher le pourcentage.
+        let total: u64 = resp
+            .header("Content-Length")
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0);
         let mut reader = resp.into_reader();
         if let Ok(mut f) = std::fs::File::create(dest) {
-            let _ = std::io::copy(&mut reader, &mut f);
+            use std::io::{Read, Write};
+            let mut buf = vec![0u8; 65536];
+            let mut recu: u64 = 0;
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if f.write_all(&buf[..n]).is_err() {
+                            break;
+                        }
+                        recu += n as u64;
+                        if let Some(cb) = progress {
+                            cb(recu, total);
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
         }
     }
     Some(Response { status, body: String::new() })

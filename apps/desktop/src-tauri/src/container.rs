@@ -126,6 +126,92 @@ fn docker_desktop_desactive_fenetre() -> bool {
     modifie
 }
 
+/// Sprint 33 : lit le flux stderr de `docker pull`, met a jour
+/// l'action affichee en direct (parsing des lignes de progression
+/// de docker) et retourne les dernieres lignes brutes pour le
+/// diagnostic en cas d'echec.
+#[cfg(windows)]
+fn maj_progression_pull<R: std::io::Read>(flux: R, image: &str) -> Vec<String> {
+    use std::io::{BufRead, BufReader};
+    let mut dernieres: Vec<String> = Vec::new();
+    let mut couches: std::collections::HashMap<String, (f64, f64)> =
+        std::collections::HashMap::new();
+    let mut derniere_maj: Option<Instant> = None;
+    for ligne in BufReader::new(flux).lines() {
+        let Ok(l) = ligne else { break };
+        let l = l.trim_end_matches('\r').to_string();
+        dernieres.push(l.clone());
+        if dernieres.len() > 5 {
+            dernieres.remove(0);
+        }
+        if !maj_couches_pull(&l, &mut couches) {
+            continue;
+        }
+        // Rafraichissement limite (400 ms) : un gros pull emit des
+        // centaines de lignes, inutile de spammer le statut.
+        let doit = match derniere_maj {
+            None => true,
+            Some(t) => t.elapsed().as_millis() >= 400,
+        };
+        if !doit {
+            continue;
+        }
+        derniere_maj = Some(Instant::now());
+        let (recu, total) = couches
+            .values()
+            .fold((0.0, 0.0), |(a, b), (x, y)| (a + x, b + y));
+        crate::node::set_action(&crate::node::fmt_progress(
+            &format!("Telechargement de l'image {}", image),
+            recu as u64,
+            total as u64,
+        ));
+    }
+    dernieres
+}
+
+/// Sprint 33 : analyse une ligne de progression docker pull, format
+/// "<id>: Downloading [=====>  ] 12.3MB/45.6MB" (idem "Extracting",
+/// "Pull complete"). Retourne true si la ligne a ete comprise.
+#[cfg(windows)]
+fn maj_couches_pull(
+    ligne: &str,
+    couches: &mut std::collections::HashMap<String, (f64, f64)>,
+) -> bool {
+    let Some((id, reste)) = ligne.split_once(": ") else { return false };
+    if reste.starts_with("Pull complete") || reste.starts_with("Verifying Checksum") {
+        if let Some((recu, total)) = couches.get_mut(id) {
+            *recu = *total;
+        }
+        return true;
+    }
+    if !reste.starts_with("Downloading") && !reste.starts_with("Extracting") {
+        return false;
+    }
+    let Some(fin) = reste.rfind("] ") else { return false };
+    let morceaux: Vec<&str> = reste[fin + 2..].split('/').collect();
+    if morceaux.len() != 2 {
+        return false;
+    }
+    let (Some(recu), Some(total)) = (parse_taille(morceaux[0]), parse_taille(morceaux[1])) else {
+        return false;
+    };
+    let total = if total <= 0.0 { recu } else { total };
+    couches.insert(id.to_string(), (recu.min(total), total));
+    true
+}
+
+/// Sprint 33 : "12.3MB" / "1.2GB" / "345kB" -> octets (base 1024).
+#[cfg(windows)]
+fn parse_taille(s: &str) -> Option<f64> {
+    let t = s.trim();
+    for (suffixe, mult) in [("GB", 1073741824.0), ("MB", 1048576.0), ("kB", 1024.0), ("B", 1.0)] {
+        if let Some(v) = t.strip_suffix(suffixe) {
+            return v.trim().parse::<f64>().ok().map(|n| n * mult);
+        }
+    }
+    t.parse::<f64>().ok()
+}
+
 /// Sprint 19 : execution conteneur. Windows uniquement, via docker.exe
 /// (Docker Desktop). Le dossier sandbox Windows est monte directement
 /// sur /work (Docker Desktop accepte les chemins Windows en /).
@@ -221,38 +307,55 @@ pub(crate) fn run_container_chunk(
     // telechargement de l'image. Ce temps est facture au client a
     // tarif reduit (20 %) et n'est jamais paye au vendeur. Si
     // l'image est deja en cache local, le pull est quasi instantane.
+    // Sprint 33 : la progression du pull est affichee en direct dans
+    // l'app (parsing des lignes de progression de docker).
     let pull_started = Instant::now();
-    let pull_out = Command::new("docker")
-        .args(["pull", image])
-        .creation_flags(CREATE_NO_WINDOW)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .output();
+    let mut pull_detail = String::new();
+    let pull_ok = {
+        let mut child = match Command::new("docker")
+            .args(["pull", image])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                return mk("failed", &format!("lancement de docker pull : {e}"), None, None);
+            }
+        };
+        // Sprint 33 : lecture du flux de progression ligne par ligne,
+        // mise a jour de l'action affichee (throttle 400 ms).
+        let dernieres = match child.stderr.take() {
+            Some(se) => maj_progression_pull(se, image),
+            None => Vec::new(),
+        };
+        pull_detail = dernieres.join(" | ");
+        match child.wait() {
+            Ok(s) => s.success(),
+            Err(e) => {
+                return mk("failed", &format!("attente docker pull : {e}"), None, None);
+            }
+        }
+    };
     pull_ms.set(pull_started.elapsed().as_millis() as u64);
-    match pull_out {
-        Ok(o) if o.status.success() => {
-            crate::node::trace(&format!(
-                "{} image telechargee en {} ms",
-                spec.chunk_id,
-                pull_ms.get()
-            ));
-        }
-        Ok(o) => {
-            return mk(
-                "failed",
-                &format!(
-                    "pull de l'image impossible | {}",
-                    tail_utf8(&o.stderr)
-                ),
-                None,
-                None,
-            );
-        }
-        Err(e) => {
-            return mk("failed", &format!("lancement de docker pull : {e}"), None, None);
-        }
+    if !pull_ok {
+        return mk(
+            "failed",
+            &format!(
+                "pull de l'image impossible | {}",
+                tail_utf8(&pull_detail)
+            ),
+            None,
+            None,
+        );
     }
+    crate::node::trace(&format!(
+        "{} image telechargee en {} ms",
+        spec.chunk_id,
+        pull_ms.get()
+    ));
 
     // Dossier sandbox Windows, monte tel quel dans le conteneur.
     let dir = std::env::temp_dir()
@@ -348,6 +451,14 @@ pub(crate) fn run_container_chunk(
         .args(&spec.args);
 
     builder.creation_flags(CREATE_NO_WINDOW);
+
+    // Sprint 33 : action affichee pendant le calcul (la charge GPU
+    // reste visible en direct dans le tableau de bord).
+    crate::node::set_action(if gpu {
+        "Calcul en cours (GPU demande pour ce job)..."
+    } else {
+        "Calcul en cours (CPU)..."
+    });
 
     // Sprint 30 : le temps de calcul mesure l'execution du conteneur
     // (docker run), hors telechargement de l'image.

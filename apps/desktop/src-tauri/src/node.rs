@@ -29,19 +29,26 @@ fn wsl2_ready() -> bool {
 
 /// Sprint 25 : detection GPU pour les jobs conteneur avec "gpu": true.
 /// Probe `docker run --rm --gpus all alpine true` : reussie = le daemon
-/// peut passer le GPU au conteneur. Resultat MEMORISE (probe lente,
-/// une seule fois par session), re-declare au register suivant.
+/// peut passer le GPU au conteneur. Sprint 33 : le resultat est
+/// RE-SONDE au moins toutes les 2 minutes (avant, il etait memorise
+/// pour toute la session : un Docker Desktop pret APRES le lancement
+/// de l'app etait ignore pour toujours).
 #[cfg(windows)]
 fn gpu_ready() -> bool {
     use std::os::windows::process::CommandExt;
-    use std::sync::atomic::{AtomicU8, Ordering};
-    // 0 = inconnu, 1 = pret, 2 = non pret.
-    static STATE: std::sync::OnceLock<AtomicU8> = std::sync::OnceLock::new();
-    let st = STATE.get_or_init(|| AtomicU8::new(0));
-    match st.load(Ordering::Relaxed) {
-        1 => return true,
-        2 => return false,
-        _ => {}
+    // Sprint 33 : le resultat est re-sonde au moins toutes les
+    // 2 minutes. Avant, il etait memorise pour toute la session :
+    // si Docker Desktop devenait pret APRES le lancement de l'app
+    // (cas reel vu le 8 nov. : noeud gpu_ready false malgre un RTX
+    // 5070), le noeud ne declarait JAMAIS le GPU. Un resultat frais
+    // est redeclare au register suivant (boucle de 5 s).
+    static STATE: std::sync::OnceLock<Mutex<Option<(std::time::Instant, bool)>>> =
+        std::sync::OnceLock::new();
+    let cell = STATE.get_or_init(|| Mutex::new(None));
+    if let Some((sonde_a, pret)) = *cell.lock().unwrap() {
+        if sonde_a.elapsed().as_secs() < 120 {
+            return pret;
+        }
     }
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let ok = std::process::Command::new("docker")
@@ -50,7 +57,7 @@ fn gpu_ready() -> bool {
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false);
-    st.store(if ok { 1 } else { 2 }, Ordering::Relaxed);
+    *cell.lock().unwrap() = Some((std::time::Instant::now(), ok));
     ok
 }
 
@@ -67,6 +74,9 @@ pub struct NodeStatus {
     pub chunks_done: u32,
     pub chunks_failed: u32,
     pub last_error: String,
+    /// Sprint 33 : action en cours, affichee en direct dans le
+    /// tableau de bord (telechargement, calcul, envoi du resultat).
+    pub current_action: String,
 }
 
 fn status_cell() -> &'static Mutex<NodeStatus> {
@@ -79,6 +89,7 @@ fn status_cell() -> &'static Mutex<NodeStatus> {
             chunks_done: 0,
             chunks_failed: 0,
             last_error: String::new(),
+            current_action: String::new(),
         })
     })
 }
@@ -188,6 +199,7 @@ fn node_loop(gateway: String, node_id: String) {
 
 fn run_and_report(gateway: &str, node_id: &str, chunk: &serde_json::Value) {
     crate::availability::set_working(true);
+    set_action("Traitement d'une tache...");
     let res = run_chunk_gateway(gateway, node_id, chunk);
     crate::availability::set_working(false);
     let payload = serde_json::json!({
@@ -225,6 +237,10 @@ fn run_and_report(gateway: &str, node_id: &str, chunk: &serde_json::Value) {
             Some(p) => {
                 let taille = std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
                 trace(&format!("{} fichier {} octets a pousser", res.chunk_id, taille));
+                set_action(&format!(
+                    "Envoi du resultat ({:.1} Mo)...",
+                    taille as f64 / 1048576.0
+                ));
                 if taille > 5 * 1024 * 1024 * 1024 {
                     note = "fichier trop volumineux (5 Go)".to_string();
                     set_error("fichier resultat trop volumineux (5 Go max), non rapatrie");
@@ -282,6 +298,7 @@ fn run_and_report(gateway: &str, node_id: &str, chunk: &serde_json::Value) {
         ));
     }
 
+    clear_action();
     let mut st = status_cell().lock().unwrap();
     if res.outcome == "ok" {
         st.chunks_done += 1;
@@ -340,7 +357,21 @@ fn fetch_assets(
             "/v1/assets/{}/node-download?node_id={}&chunk_id={}",
             asset_id, node_id, chunk_id
         );
-        match crate::http::get_file(gateway, &url_path, &path) {
+        // Sprint 33 : progression du telechargement affichee en direct
+        // dans le tableau de bord (pourcentage + tailles recues/totales).
+        let progress = |recu: u64, total: u64| {
+            set_action(&fmt_progress(
+                &format!("Telechargement de {}", filename),
+                recu,
+                total,
+            ));
+        };
+        match crate::http::get_file(
+            gateway,
+            &url_path,
+            &path,
+            Some(&progress as &dyn Fn(u64, u64)),
+        ) {
             Some(r) if r.status == 200 => {}
             Some(r) => return Err(format!("asset {} refuse : HTTP {}", asset_id, r.status)),
             None => return Err(format!("asset {} : gateway injoignable", asset_id)),
@@ -436,6 +467,29 @@ fn run_chunk_gateway(
 
 fn set_error(msg: &str) {
     status_cell().lock().unwrap().last_error = msg.to_string();
+}
+
+/// Sprint 33 : action en cours, affichee en direct dans le tableau
+/// de bord (telechargement d'image ou de fichier, calcul, envoi).
+pub(crate) fn set_action(msg: &str) {
+    status_cell().lock().unwrap().current_action = msg.to_string();
+}
+
+/// Sprint 33 : plus d'action en cours (tache terminee).
+pub(crate) fn clear_action() {
+    status_cell().lock().unwrap().current_action.clear();
+}
+
+/// Sprint 33 : progression lisible : "<label> : 42 % (12,3 Mo / 29,9 Mo)".
+/// Taille totale inconnue : "<label> : 12,3 Mo".
+pub(crate) fn fmt_progress(label: &str, done: u64, total: u64) -> String {
+    let mo = |n: u64| (n as f64 / 1048576.0 * 10.0).round() / 10.0;
+    if total > 0 {
+        let pct = ((done as f64 / total as f64) * 100.0).round() as u64;
+        format!("{} : {} % ({:.1} Mo / {:.1} Mo)", label, pct, mo(done), mo(total))
+    } else {
+        format!("{} : {:.1} Mo", label, mo(done))
+    }
 }
 
 /// Sprint 26c : trace locale du noeud, append dans %TEMP%.

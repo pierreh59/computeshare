@@ -103,6 +103,7 @@
           <div class="cs-stat-value" id="mine">PAUSE</div></div>
       </div>
       <p id="state" class="state">...</p>
+      <p id="action" class="state" style="display:none"></p>
       <div class="cs-card card-wide">
         <div class="avail-row">
           <button id="availbtn" class="ok">...</button>
@@ -335,6 +336,16 @@
             ? " — noeud en ligne : " + n.chunks_done + " ok / " + n.chunks_failed + " échecs" +
               (n.last_error ? " — " + n.last_error : "")
             : " — noeud arrêté";
+        // Sprint 33 : action en cours (telechargement, calcul, envoi).
+        const act = document.querySelector("#action");
+        if (act) {
+          if (n.current_action) {
+            act.textContent = "\u23F3 " + n.current_action;
+            act.style.display = "";
+          } else {
+            act.style.display = "none";
+          }
+        }
         try { drawActivity(await inv("get_activity")); } catch (e) { /* graphe au suivant */ }
       } catch (e) { /* rafraichissement suivant */ }
     }
