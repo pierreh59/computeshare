@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	minWithdrawalEur = 5.0
+	minWithdrawalEur   = 5.0
 	withdrawalIDPrefix = "wd-"
 	// Reconciliation toutes les 24 h (LAI-34).
 	reconcileInterval = 24 * time.Hour
@@ -73,12 +73,12 @@ type KYC struct {
 
 // Wallet : grand livre + retraits + KYC, protege par mutex.
 type Wallet struct {
-	mu           sync.Mutex
-	store        *Store
-	ledger       []*LedgerEntry
-	withdrawals  map[string]*Withdrawal
-	kyc          map[string]*KYC
-	seq          int64
+	mu          sync.Mutex
+	store       *Store
+	ledger      []*LedgerEntry
+	withdrawals map[string]*Withdrawal
+	kyc         map[string]*KYC
+	seq         int64
 }
 
 func NewWallet(store *Store) *Wallet {
@@ -349,10 +349,10 @@ func walletBalance(w *Wallet) http.HandlerFunc {
 			return
 		}
 		writeJSON(rw, map[string]interface{}{
-			"node_id":   nodeID,
-			"balance":   w.Balance(nodeID),
-			"kyc":       w.KYCStatus(nodeID),
-			"history":   w.History(nodeID),
+			"node_id": nodeID,
+			"balance": w.Balance(nodeID),
+			"kyc":     w.KYCStatus(nodeID),
+			"history": w.History(nodeID),
 		})
 	}
 }
@@ -401,4 +401,20 @@ func walletWithdraw(w *Wallet) http.HandlerFunc {
 		}
 		writeJSON(rw, wd)
 	}
+}
+
+// PayoutsSince (Sprint 32) : versements fournisseurs d'une periode
+// (bilan hebdo) : total EUR verse + noeuds distinctement payes.
+func (w *Wallet) PayoutsSince(since time.Time) (total float64, nodes map[string]bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	nodes = make(map[string]bool)
+	for _, e := range w.ledger {
+		if e.At.Before(since) || e.EntryType != "payout" {
+			continue
+		}
+		total += e.AmountEur
+		nodes[e.NodeID] = true
+	}
+	return
 }

@@ -23,11 +23,34 @@
   skipDockerInstall:
 !macroend
 
-; Sprint 26b (0.7.1) : fermer l'app AVANT l'installation. Des fois le
-; processus reste bloque (double instance, lancement admin) et fait
-; echouer la mise a jour avec "Failed to kill ComputeShare". On force
-; la fermeture de l'arbre complete (app + processus WebView enfants).
+; Sprint 32 (0.7.11) : correctif "Failed to kill ComputeShare" + app qui
+; ne redemarre pas apres la mise a jour. Cause : depuis Tauri CLI 2.12,
+; l'installateur utilise le Windows Restart Manager, qui echoue si l'exe
+; est encore en cours de fermeture (issue tauri #16277). Correctif eprouve
+; du projet Monoleaf (PR #101) : attendre que l'exe instale soit de
+; nouveau ouvrable en ecriture (un exe en execution est verrouille)
+; AVANT de laisser le check du template tourner. L'installateur lance par
+; l'updater redemarre ensuite l'app tout seul (/R) : fixer le kill fixe
+; aussi le redemarrage. NB : l'exe instale s'appelle ${MAINBINARYNAME}.exe
+; (ComputeShare), PAS computeshare-desktop.exe (nom du binaire cargo) :
+; l'ancien taskkill ne tuait donc jamais le bon processus.
 !macro NSIS_HOOK_PREINSTALL
-  nsExec::ExecToLog 'taskkill /F /T /IM computeshare-desktop.exe'
-  Sleep 1500
+  ; Fermeture best-effort (install manuelle avec l'appli ouverte).
+  nsExec::ExecToLog 'taskkill /F /T /IM ${MAINBINARYNAME}.exe'
+  ; Attente que le fichier ne soit plus verrouille (max ~20 s).
+  StrCpy $R9 0
+  IfFileExists "$INSTDIR\${MAINBINARYNAME}.exe" 0 cs_wait_done
+  cs_wait_loop:
+    ClearErrors
+    FileOpen $R8 "$INSTDIR\${MAINBINARYNAME}.exe" a
+    IfErrors cs_wait_busy cs_wait_free
+  cs_wait_busy:
+    IntOp $R9 $R9 + 1
+    IntCmp $R9 80 cs_wait_done cs_wait_retry cs_wait_done
+  cs_wait_retry:
+    Sleep 250
+    Goto cs_wait_loop
+  cs_wait_free:
+    FileClose $R8
+  cs_wait_done:
 !macroend

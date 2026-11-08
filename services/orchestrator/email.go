@@ -172,3 +172,37 @@ func (e *Emailer) SendLowCredits(email string, balance float64) {
 		log.Printf("email: credits bas envoye a %s", email)
 	}
 }
+
+// SendReport : bilan d'activite hebdo pour l'operateur (Sprint 32).
+func (e *Emailer) SendReport(to string, s map[string]interface{}) {
+	days := int(asFloat(s["periode_jours"]))
+	row := func(label, value string) string {
+		return "<tr><td style=\"padding:6px 12px;border-bottom:1px solid #e2e8f0;color:#64748b\">" + label +
+			"</td><td style=\"padding:6px 12px;border-bottom:1px solid #e2e8f0;text-align:right\"><b>" + value + "</b></td></tr>"
+	}
+	n := func(k string) string { return fmt.Sprintf("%.4f", asFloat(s[k])) }
+	table := row("Heures de calcul vendues", fmt.Sprintf("%.4f h GPU", asFloat(s["heures_vendues"])))
+	table += row("Tâches réussies", fmt.Sprintf("%d", int(asFloat(s["taches_reussies"]))))
+	table += row("Facturé aux clients (HT)", n("facture_ht_eur")+" EUR")
+	table += row("dont TVA collectée", n("tva_eur")+" EUR")
+	table += row("Rechargements de crédits", n("rechargements_eur")+" EUR")
+	table += row("Versé aux fournisseurs", n("verse_fournisseurs_eur")+" EUR")
+	table += row("Clients actifs", fmt.Sprintf("%d", int(asFloat(s["clients_actifs"]))))
+	table += row("Nœuds fournisseurs actifs", fmt.Sprintf("%d", int(asFloat(s["noeuds_actifs"]))))
+	table += row("Nœuds en ligne actuellement", fmt.Sprintf("%d", int(asFloat(s["noeuds_en_ligne"]))))
+	table += row("Équivalent AWS on-demand", n("equivalent_aws_eur")+" EUR")
+	table += row("Économie réalisée par les clients", n("economie_clients_eur")+" EUR")
+	html := "<!DOCTYPE html><html lang=\"fr\"><body style=\"font-family:Arial,Helvetica,sans-serif;background:#f8fafc;padding:24px;color:#0f172a\">" +
+		"<div style=\"max-width:560px;margin:auto;background:#ffffff;border-radius:12px;padding:32px;border:1px solid #e2e8f0\">" +
+		"<h2 style=\"margin-top:0\">🥗 ComputeShare</h2>" +
+		fmt.Sprintf("<p>Bilan d'activité du <b>%v</b> au <b>%v</b> :</p>", s["du"], s["au"]) +
+		"<table style=\"width:100%;border-collapse:collapse\">" + table + "</table>" +
+		"<p style=\"color:#64748b;font-size:13px\">Bilan envoyé automatiquement chaque lundi matin, ou à la demande depuis le dashboard admin.</p>" +
+		"</div></body></html>"
+	subject := fmt.Sprintf("Bilan ComputeShare - %d derniers jours", days)
+	if err := e.send(to, subject, html); err != nil {
+		log.Printf("email: bilan non envoye a %s : %v", to, err)
+	} else {
+		log.Printf("email: bilan envoye a %s (%d jours)", to, days)
+	}
+}

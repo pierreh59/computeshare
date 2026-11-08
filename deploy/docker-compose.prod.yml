@@ -34,6 +34,8 @@ services:
       BREVO_SENDER_EMAIL: ${BREVO_SENDER_EMAIL:-}
       BREVO_SENDER_NAME: ${BREVO_SENDER_NAME:-}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      # Sprint 32 : destinataire du bilan hebdo (vide : pas d'envoi auto).
+      REPORT_EMAIL: ${REPORT_EMAIL:-}
     volumes:
       - resultsdata:/data
     depends_on:

@@ -191,12 +191,12 @@ func (b *Billing) Usage(orgID string) map[string]interface{} {
 	}
 	awsCost := hours * awsCompareEurPerHour
 	out := map[string]interface{}{
-		"org_id":            orgID,
-		"balance_eur":       b.balances[orgID],
-		"spent_eur":         spent,
-		"vat_eur":           vat,
-		"gpu_hours":         hours,
-		"topups":            topups,
+		"org_id":             orgID,
+		"balance_eur":        b.balances[orgID],
+		"spent_eur":          spent,
+		"vat_eur":            vat,
+		"gpu_hours":          hours,
+		"topups":             topups,
 		"aws_equivalent_eur": awsCost,
 	}
 	if awsCost > 0 {
@@ -330,4 +330,30 @@ func adminBillingRefund(b *Billing) http.HandlerFunc {
 			req.AmountEur, req.OrgID, req.Ref))
 		writeJSON(w, e)
 	}
+}
+
+// ReportSince (Sprint 32) : agregats d'une periode pour le bilan
+// hebdo : heures GPU vendues, EUR factures HT (les debits usage sont
+// negatifs dans le journal), TVA, rechargements, taches reussies et
+// organisations clientes actives.
+func (b *Billing) ReportSince(since time.Time) (hours, spentHT, vat, topupsEur float64, taches int, orgs map[string]bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	orgs = make(map[string]bool)
+	for _, e := range b.events {
+		if e.At.Before(since) {
+			continue
+		}
+		switch e.EventType {
+		case "usage":
+			spentHT += -e.AmountEur
+			vat += e.VatEur
+			hours += e.GpuHours
+			taches++
+			orgs[e.OrgID] = true
+		case "topup":
+			topupsEur += e.AmountEur
+		}
+	}
+	return
 }

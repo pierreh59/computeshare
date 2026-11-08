@@ -520,6 +520,15 @@ h2{font-size:16px;margin:0}
 </div>
 
 <div class="card">
+<h2>&#128202; Bilan d’activité</h2>
+<div class="row">
+<button id="report">Envoyer le bilan par e-mail</button>
+<span id="reportmsg" class="muted"></span>
+</div>
+<p class="muted">Les 7 derniers jours, envoyés à l’adresse définie sur le serveur (REPORT_EMAIL). Le bilan part aussi automatiquement chaque lundi matin.</p>
+</div>
+
+<div class="card">
 <h2>&#128220; Journal temps reel</h2>
 <div class="log" id="log"></div>
 </div>
@@ -655,6 +664,11 @@ document.getElementById('topup').onclick=function(){
 };
 document.getElementById('refund').onclick=function(){
   api('/admin/billing/refund',{org_id:document.getElementById('orgid').value.trim(),amount_eur:parseFloat(document.getElementById('amount').value),ref:'remboursement manuel dashboard'}).then(function(){document.getElementById('billmsg').textContent='Remboursement effectue.';load();}).catch(showErr);
+};
+
+document.getElementById('report').onclick=function(){
+  document.getElementById('reportmsg').textContent='Envoi en cours...';
+  api('/admin/report/email',{}).then(function(s){document.getElementById('reportmsg').textContent='Bilan envoy\u00e9 : '+String(s.taches_reussies||0)+' t\u00e2ches, '+String(s.facture_ht_eur||0)+' EUR factur\u00e9s.';}).catch(function(e){document.getElementById('reportmsg').innerHTML='<span style="color:#f87171">'+esc(String(e))+'</span>';});
 };
 
 if(akey()){document.getElementById('akey').value=akey();load();}
