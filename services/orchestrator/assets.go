@@ -139,7 +139,10 @@ func v1UploadAsset(orgs *OrgStore, assets *AssetStore) http.HandlerFunc {
 		}
 		buf, err := io.ReadAll(io.LimitReader(r.Body, 100<<20))
 		if err != nil || len(buf) == 0 {
-			http.Error(w, "invalid body", http.StatusBadRequest)
+			// Sprint 27b : message explicite (vu en vrai : un fichier
+			// vide 0 octet televerse depuis la console affichait un
+			// "invalid body" incomprehensible pour le client).
+			http.Error(w, "fichier vide ou illisible", http.StatusBadRequest)
 			return
 		}
 		sum := sha256.Sum256(buf)

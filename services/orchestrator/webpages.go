@@ -427,6 +427,7 @@ var mesAssets=[];
 function uploadAsset(){
  var f=document.getElementById('assetfile').files[0];
  if(!f){document.getElementById('assetmsg').innerHTML='<p class="err">Choisissez d\'abord un fichier.</p>';return;}
+ if(f.size===0){document.getElementById('assetmsg').innerHTML='<p class="err">Le fichier est vide (0 octet) : ouvrez-le, écrivez du contenu, enregistrez (Ctrl+S), puis retéléversez-le.</p>';return;}
  if(f.size>100*1024*1024){document.getElementById('assetmsg').innerHTML='<p class="err">Fichier trop volumineux (100 Mo max).</p>';return;}
  document.getElementById('assetmsg').innerHTML='<p class="muted">Téléversement en cours...</p>';
  fetch('/v1/assets?filename='+encodeURIComponent(f.name),{

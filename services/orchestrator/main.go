@@ -12,7 +12,7 @@ import (
 
 // orchestratorVersion : version de l'orchestrateur, affichee sur le
 // dashboard admin et dans /healthz. A incrementer a chaque sprint.
-const orchestratorVersion = "v0.23.0"
+const orchestratorVersion = "v0.23.1"
 
 func main() {
 	port := os.Getenv("PORT")
