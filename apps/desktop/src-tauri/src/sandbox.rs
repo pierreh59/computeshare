@@ -206,6 +206,17 @@ pub(crate) fn hash_file(path: &PathBuf) -> Option<String> {
     Some(format!("{:x}", digest))
 }
 
+/// Sprint 27c : efface les dossiers locaux d'un chunk (sandbox de
+/// travail + assets d'entree) une fois le job termine. Les fichiers
+/// du client ne doivent pas rester sur le PC du fournisseur apres
+/// la remontee du resultat (confidentialite des donnees clientes).
+pub(crate) fn cleanup_chunk_dirs(chunk_id: &str) {
+    let id = sanitize_id(chunk_id);
+    let base = PathBuf::from(std::env::temp_dir());
+    let _ = fs::remove_dir_all(base.join("computeshare-sandbox").join(&id));
+    let _ = fs::remove_dir_all(base.join("computeshare-assets").join(&id));
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -222,5 +233,20 @@ mod tests {
         assert!(super::is_allowed("ffmpeg.exe"));
         assert!(!super::is_allowed("C:\\evil\\ffmpeg.exe"));
         assert!(!super::is_allowed("cmd.exe"));
+    }
+
+    #[test]
+    fn cleanup_efface_les_dossiers_du_chunk() {
+        let id = super::sanitize_id("test-cleanup-27c");
+        let base = std::path::PathBuf::from(std::env::temp_dir());
+        let sandbox = base.join("computeshare-sandbox").join(&id);
+        let assets = base.join("computeshare-assets").join(&id);
+        std::fs::create_dir_all(&sandbox).unwrap();
+        std::fs::create_dir_all(&assets).unwrap();
+        std::fs::write(sandbox.join("entree.txt"), "donnees cliente").unwrap();
+        std::fs::write(assets.join("entree.txt"), "donnees cliente").unwrap();
+        super::cleanup_chunk_dirs("test-cleanup-27c");
+        assert!(!sandbox.exists());
+        assert!(!assets.exists());
     }
 }

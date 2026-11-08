@@ -256,6 +256,27 @@ fn run_and_report(gateway: &str, node_id: &str, chunk: &serde_json::Value) {
         &serde_json::json!({"chunk_id": res.chunk_id, "node_id": node_id, "note": note}).to_string(),
     );
 
+    // Sprint 27c : effacement des fichiers locaux du chunk (sandbox
+    // de travail + assets d'entree). Regle : on efface DES QUE le
+    // resultat est remonte vers le serveur (upload HTTP 200) ou que
+    // le chunk a echoue (aucun fichier a proteger). On ne CONSERVE
+    // les fichiers QUE si l'upload du resultat a ete refuse ou la
+    // gateway injoignable : diagnostic et recuperation manuelle
+    // restent possibles, avec une trace explicite.
+    let upload_refuse = note.starts_with("refus HTTP") || note == "gateway injoignable";
+    if !upload_refuse {
+        crate::sandbox::cleanup_chunk_dirs(&res.chunk_id);
+        trace(&format!(
+            "{} fichiers locaux supprimes (sandbox + assets)",
+            res.chunk_id
+        ));
+    } else {
+        trace(&format!(
+            "{} fichiers locaux CONSERVES : upload du resultat en echec ({})",
+            res.chunk_id, note
+        ));
+    }
+
     let mut st = status_cell().lock().unwrap();
     if res.outcome == "ok" {
         st.chunks_done += 1;
