@@ -27,6 +27,13 @@ services:
       # Sprint 27 : assets d'entree des jobs (meme volume /data,
       # deja possede par l'utilisateur app depuis le fix du 7 nov.).
       ASSETS_DIR: /data/assets
+      # Sprint 29 : e-mails transactionnels Brevo (verification d'adresse,
+      # reinitialisation de mot de passe). BREVO_API_KEY vient du .env ;
+      # les autres valeurs ont des defauts cote orchestrateur.
+      BREVO_API_KEY: ${BREVO_API_KEY:-}
+      BREVO_SENDER_EMAIL: ${BREVO_SENDER_EMAIL:-}
+      BREVO_SENDER_NAME: ${BREVO_SENDER_NAME:-}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
     volumes:
       - resultsdata:/data
     depends_on:
