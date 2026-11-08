@@ -431,7 +431,9 @@ fn set_error(msg: &str) {
 
 /// Sprint 26c : trace locale du noeud, append dans %TEMP%.
 /// Diagnostic du rapatriement (chaque etape, avec code HTTP).
-fn trace(msg: &str) {
+/// Sprint 28 : pub(crate) - container.rs trace aussi le parcours
+/// de relance silencieuse de Docker Desktop.
+pub(crate) fn trace(msg: &str) {
     use std::io::Write;
     let p = std::env::temp_dir().join("computeshare-node.log");
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {

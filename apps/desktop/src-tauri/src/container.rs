@@ -40,6 +40,39 @@ pub(crate) fn sanitize_asset_filename(name: &str) -> String {
     s.trim_start_matches('.').to_string()
 }
 
+/// Sprint 28 : chemin de Docker Desktop (installation standard).
+#[cfg(windows)]
+fn docker_desktop_exe() -> std::path::PathBuf {
+    let base = std::env::var("PROGRAMFILES").unwrap_or_else(|_| r"C:\Program Files".to_string());
+    std::path::PathBuf::from(base)
+        .join("Docker")
+        .join("Docker")
+        .join("Docker Desktop.exe")
+}
+
+/// Sprint 28 : Docker Desktop est-il installe sur ce PC ?
+#[cfg(windows)]
+fn docker_desktop_present() -> bool {
+    docker_desktop_exe().exists()
+        || std::path::PathBuf::from(r"C:\Program Files\Docker\Docker\Docker Desktop.exe")
+            .exists()
+}
+
+/// Sprint 28 : le daemon docker repond-il ? `docker version` ne
+/// reussit que si le moteur tourne (docker --version reussirait meme
+/// daemon arrete).
+#[cfg(windows)]
+fn docker_daemon_pret() -> bool {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    std::process::Command::new("docker")
+        .arg("version")
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 /// Sprint 19 : execution conteneur. Windows uniquement, via docker.exe
 /// (Docker Desktop). Le dossier sandbox Windows est monte directement
 /// sur /work (Docker Desktop accepte les chemins Windows en /).
@@ -69,21 +102,52 @@ pub(crate) fn run_container_chunk(
         return mk("rejected", "reference d'image conteneur invalide", None, None);
     }
 
-    // Docker Desktop doit etre lance : `docker version` ne reussit que
-    // si le daemon repond (docker --version reussirait meme daemon arrete).
-    let docker_ok = Command::new("docker")
-        .arg("version")
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-    if !docker_ok {
-        return mk(
-            "failed",
-            "docker introuvable ou arrete (installez/lancez Docker Desktop)",
-            None,
-            None,
-        );
+    // Docker Desktop doit etre lance. Sprint 28 : si le daemon ne
+    // repond pas, on relance Docker Desktop EN SILENCE (CREATE_NO_WINDOW
+    // sur l'executable ; le reglage Docker "Open Docker Dashboard at
+    // startup" decoche evite de surcroit toute fenetre) et on attend
+    // sa reponse jusqu'a 90 secondes avant d'abandonner proprement.
+    if !docker_daemon_pret() {
+        if docker_desktop_present() {
+            crate::node::trace(&format!(
+                "{} daemon docker arrete : relance silencieuse de Docker Desktop",
+                spec.chunk_id
+            ));
+            let _ = Command::new(&docker_desktop_exe())
+                .creation_flags(CREATE_NO_WINDOW)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn();
+            let mut pret = false;
+            for i in 0..18 {
+                std::thread::sleep(Duration::from_secs(5));
+                if docker_daemon_pret() {
+                    crate::node::trace(&format!(
+                        "{} daemon docker pret apres relance ({} s)",
+                        spec.chunk_id,
+                        (i + 1) * 5
+                    ));
+                    pret = true;
+                    break;
+                }
+            }
+            if !pret {
+                return mk(
+                    "failed",
+                    "Docker Desktop n'a pas repondu 90 s apres relance automatique : ouvrez-le une fois manuellement (au premier lancement, validez ses conditions), puis laissez-le tourner",
+                    None,
+                    None,
+                );
+            }
+        } else {
+            return mk(
+                "failed",
+                "docker introuvable ou arrete (installez/lancez Docker Desktop)",
+                None,
+                None,
+            );
+        }
     }
 
     // Dossier sandbox Windows, monte tel quel dans le conteneur.

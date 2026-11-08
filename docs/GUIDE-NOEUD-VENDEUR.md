@@ -35,13 +35,32 @@ disque.
 
 ### Docker Desktop (jobs conteneur et GPU)
 
-- Sans Docker : le noeud reste utilisable pour les jobs allowlist
-  (commandes simples), mais ne recoit pas de jobs conteneur.
-- Avec Docker : le noeud recoit aussi les jobs conteneur. Si le PC a
-  un GPU NVIDIA a jour, l'application verifie au demarrage que le
-  GPU est accessible depuis les conteneurs ; le noeud est alors
-  marque "GPU pret" et recoit les jobs GPU (factures au tarif GPU,
-  plus eleve).
+L'application utilise **Docker Desktop** pour executer les jobs
+conteneur (les mieux payes). Points importants :
+
+- Docker Desktop est installe automatiquement par l'installateur
+  si necessaire (une confirmation Windows peut etre demandee).
+- **Premiere fois OBLIGATOIRE : validez Docker.** Ouvrez Docker
+  Desktop une fois manuellement (menu Demarrer > Docker Desktop)
+  et acceptez ses conditions d'utilisation. C'est la seule action
+  que Docker exige de vous ; apres cela, vous n'avez plus jamais
+  a y toucher.
+- Ensuite, l'application s'occupe de tout : si un job arrive alors
+  que Docker est arrete, elle le relance toute seule, en silence,
+  et attend que le moteur reponde (90 secondes maximum). Vous ne
+  voyez rien s'afficher.
+- Sans Docker valide : le noeud reste utilisable pour les jobs
+  allowlist (commandes simples), mais ne recoit pas de jobs
+  conteneur ni GPU.
+- Pour un fonctionnement totalement invisible, ouvrez une fois
+  les reglages de Docker Desktop (Settings > General) :
+  cochez "Start Docker Desktop when you sign in" et DECOCHEZ
+  "Open Docker Dashboard at startup". Docker demarrera avec votre
+  session Windows sans jamais ouvrir de fenetre.
+- Si le PC a un GPU NVIDIA a jour, l'application verifie au
+  demarrage que le GPU est accessible depuis les conteneurs ; le
+  noeud est alors marque "GPU pret" et recoit les jobs GPU
+  (factures au tarif GPU, plus eleve).
 - Si Docker vient d'etre installe, relancez l'application une fois
   qu'il est demarre (icone de baleine fixe dans la barre des taches).
 
