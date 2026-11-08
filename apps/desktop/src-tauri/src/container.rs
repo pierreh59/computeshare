@@ -345,7 +345,7 @@ pub(crate) fn run_container_chunk(
             "failed",
             &format!(
                 "pull de l'image impossible | {}",
-                tail_utf8(&pull_detail)
+                tail_utf8(pull_detail.as_bytes())
             ),
             None,
             None,
