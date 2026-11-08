@@ -84,8 +84,10 @@ func (e *Emailer) send(to, subject, html string) error {
 	return nil
 }
 
-// emailShell : gabarit HTML commun des e-mails (fond clair, bouton).
-func emailShell(intro, actionURL, actionLabel, outro string) string {
+// emailShellNote : gabarit HTML commun des e-mails (fond clair,
+// bouton). note = la petite ligne grise sous le bouton (differe selon
+// le type d e-mail).
+func emailShellNote(note, intro, actionURL, actionLabel, outro string) string {
 	return `<!DOCTYPE html><html lang="fr"><body style="font-family:Arial,Helvetica,sans-serif;background:#f8fafc;padding:24px;color:#0f172a">
 <div style="max-width:520px;margin:auto;background:#ffffff;border-radius:12px;padding:32px;border:1px solid #e2e8f0">
 <h2 style="margin-top:0">🥗 ComputeShare</h2>
@@ -93,9 +95,16 @@ func emailShell(intro, actionURL, actionLabel, outro string) string {
 <p style="text-align:center;margin:28px 0">
 <a href="` + actionURL + `" style="background:#0ea5e9;color:#ffffff;padding:12px 24px;border-radius:8px;text-decoration:none">` + actionLabel + `</a>
 </p>
-<p style="color:#64748b;font-size:13px">Lien valable 1 heure. Si vous n'êtes pas à l'origine de cette action, ignorez cet e-mail.</p>
+<p style="color:#64748b;font-size:13px">` + note + `</p>
 <p>` + outro + `</p>
 </div></body></html>`
+}
+
+// emailShell : gabarit des e-mails a lien temporaire (verification,
+// reinitialisation) - lien valable 1 heure.
+func emailShell(intro, actionURL, actionLabel, outro string) string {
+	return emailShellNote("Lien valable 1 heure. Si vous n'êtes pas à l'origine de cette action, ignorez cet e-mail.",
+		intro, actionURL, actionLabel, outro)
 }
 
 // SendVerification : e-mail de verification d'adresse (inscription ou
@@ -125,5 +134,41 @@ func (e *Emailer) SendReset(email, token string) {
 		log.Printf("email: reset non envoye a %s : %v - lien de secours %s", email, err, url)
 	} else {
 		log.Printf("email: reset envoye a %s", email)
+	}
+}
+
+// SendJobDone : e-mail "votre job est termine" (Sprint 31). Envoi en
+// goroutine depuis le Notifier - ne bloque jamais la completion.
+func (e *Emailer) SendJobDone(email, jobID string, done, failed int, costEur float64) {
+	url := e.baseURL + "/me"
+	intro := fmt.Sprintf("Bonjour,<br><br>Votre job <b>%s</b> est terminé : <b>%d</b> tâche(s) réussie(s)", jobID, done)
+	if failed > 0 {
+		intro += fmt.Sprintf(" et <b>%d</b> en échec", failed)
+	}
+	intro += fmt.Sprintf(".<br>Coût réel facturé : <b>%.6f EUR HT</b>.", costEur)
+	html := emailShellNote(
+		"Vous recevez cet e-mail car vous avez un compte client ComputeShare. Vous pouvez désactiver ces notifications depuis votre console.",
+		intro, url, "Voir mes résultats",
+		"Les fichiers de résultats restent téléchargeables 30 jours depuis votre console.")
+	if err := e.send(email, "Votre job "+jobID+" est terminé - ComputeShare", html); err != nil {
+		log.Printf("email: job termine non envoye a %s : %v", email, err)
+	} else {
+		log.Printf("email: job termine envoye a %s (job %s)", email, jobID)
+	}
+}
+
+// SendLowCredits : e-mail "vos credits sont bas" (Sprint 31, seuil
+// produit = 5 EUR). Une seule alerte jusqu au rechargement.
+func (e *Emailer) SendLowCredits(email string, balance float64) {
+	url := e.baseURL + "/me"
+	html := emailShellNote(
+		"Vous recevez cet e-mail car vous avez un compte client ComputeShare. Vous pouvez désactiver ces notifications depuis votre console.",
+		fmt.Sprintf("Bonjour,<br><br>Le solde de crédits de votre compte est bas : il reste <b>%.2f EUR</b>.<br>Pour que vos jobs continuent sans interruption, pensez à recharger votre compte.", balance),
+		url, "Ouvrir ma console",
+		"En bêta, le rechargement de crédits se fait avec l'équipe ComputeShare : répondez simplement à cet e-mail.")
+	if err := e.send(email, "Vos crédits ComputeShare sont bas - ComputeShare", html); err != nil {
+		log.Printf("email: credits bas non envoye a %s : %v", email, err)
+	} else {
+		log.Printf("email: credits bas envoye a %s", email)
 	}
 }

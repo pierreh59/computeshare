@@ -117,6 +117,14 @@ function esc(s){var d=document.createElement('div');d.textContent=s==null?'':Str
 // Sprint 15c : carte de gestion de compte (RGPD).
 function renderAccountCard(){
  var u=user();
+ // Sprint 31 : preferences de notifications e-mail (clients).
+ var ntf='';
+ if(u.role==='client'){
+  ntf='<h2 style="margin-top:28px">Notifications par e-mail</h2>'+
+  '<label style="display:block;margin:6px 0"><input type="checkbox" id="ntf-job"'+(u.notify_job_done===false?'':' checked')+'> Prévenir quand un job est terminé</label>'+
+  '<label style="display:block;margin:6px 0"><input type="checkbox" id="ntf-low"'+(u.notify_low_credits===false?'':' checked')+'> Prévenir quand mes crédits sont bas (moins de 5 €)</label>'+
+  '<button class="blue" onclick="saveNotifications()">Enregistrer mes préférences</button>';
+ }
  document.getElementById('acct').innerHTML=
   '<label>Nom ou entreprise affiché</label>'+
   '<input id="acc-name" value="'+esc(u.display_name||'')+'">'+
@@ -125,7 +133,8 @@ function renderAccountCard(){
   '<label>Mot de passe actuel</label><input id="acc-pw0" type="password">'+
   '<label>Nouveau mot de passe (8 caractères min.)</label><input id="acc-pw1" type="password">'+
   '<button class="blue" onclick="savePass()">Changer le mot de passe</button>'+
-  '<h2 style="margin-top:28px">Mon statut</h2>'+
+  ntf+
+ '<h2 style="margin-top:28px">Mon statut</h2>'+
   '<p class="muted">Compte '+(u.account_type==='societe'?'société':'particulier')+
   (u.account_type==='societe'?(u.siret_verified?' — <span class="ok">SIRET vérifié ✓</span>':' — <span class="err">SIRET en cours de vérification</span>'):'')+'</p>'+
   '<label>Raison sociale</label><input id="soc2-name" value="'+esc(u.company_name||'')+'">'+
@@ -170,6 +179,15 @@ function saveCompany(){
   localStorage.setItem('cs-user',JSON.stringify(u2));
   acctMsg('✅ Statut enregistré. La vérification INSEE du SIRET est lancée.','ok');
   setTimeout(renderAccountCard,400);
+ }).catch(function(e){acctMsg('Erreur : '+esc(e.message),'err');});
+}
+// Sprint 31 : enregistrement des preferences de notifications.
+function saveNotifications(){
+ var body={notify_job_done:document.getElementById('ntf-job').checked,
+  notify_low_credits:document.getElementById('ntf-low').checked};
+ api('/auth/notifications',{method:'POST',body:JSON.stringify(body)}).then(function(u2){
+  localStorage.setItem('cs-user',JSON.stringify(u2));
+  acctMsg('\u2705 Préférences de notification enregistrées.','ok');
  }).catch(function(e){acctMsg('Erreur : '+esc(e.message),'err');});
 }
 function doExport(){

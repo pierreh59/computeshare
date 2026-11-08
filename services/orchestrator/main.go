@@ -12,7 +12,7 @@ import (
 
 // orchestratorVersion : version de l'orchestrateur, affichee sur le
 // dashboard admin et dans /healthz. A incrementer a chaque sprint.
-const orchestratorVersion = "v0.25.1"
+const orchestratorVersion = "v0.26.0"
 
 func main() {
 	port := os.Getenv("PORT")
@@ -43,6 +43,8 @@ func main() {
 		accounts.RestoreAuthToken(t.ID, t.UserID, t.Kind, t.Hash, t.ExpiresAt)
 	}
 	accounts.emails = NewEmailer()
+	// Sprint 31 : notifications e-mail (job termine, credits bas).
+	setNotifier(NewNotifier(accounts, accounts.emails))
 	store.LoadWallet(wallet)
 	store.LoadBilling(billing)
 	wallet.Start()
@@ -79,6 +81,8 @@ func main() {
 	http.HandleFunc("/auth/profile", withSession(accounts, accounts.handleProfile))
 	// Sprint 15d (LAI-61) : declaration societe (SIRET/TVA + verif SIRENE).
 	http.HandleFunc("/auth/company", withSession(accounts, accounts.handleCompany))
+	// Sprint 31 : preferences de notifications e-mail (opt-out).
+	http.HandleFunc("/auth/notifications", withSession(accounts, accounts.handleNotifications))
 	http.HandleFunc("/auth/password", withSession(accounts, accounts.handlePassword))
 	http.HandleFunc("/auth/export", withSession(accounts, accounts.handleExport(registry, wallet, billing)))
 	http.HandleFunc("/auth/account", withSession(accounts, accounts.handleDeleteAccount(registry)))
@@ -433,6 +437,10 @@ func main() {
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
+		}
+		// Sprint 31 : le rechargement rearme l alerte credits bas.
+		if notifier != nil {
+			notifier.ResetLowCredits(req.OrgID)
 		}
 		dashLog("admin", fmt.Sprintf("rechargement de %.2f EUR pour %s par l'admin", req.AmountEur, req.OrgID))
 		writeJSON(w, e)

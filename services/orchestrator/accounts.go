@@ -51,6 +51,11 @@ type User struct {
 	// de job.
 	EmailVerified bool `json:"email_verified"`
 
+	// Sprint 31 : preferences de notifications e-mail (desactivables
+	// depuis la console client).
+	NotifyJobDone     bool `json:"notify_job_done"`
+	NotifyLowCredits  bool `json:"notify_low_credits"`
+
 	// Sprint 15d : particulier vs societe (LAI-61). Les champs societe
 	// sont vides pour un particulier.
 	AccountType    string     `json:"account_type"`           // particulier | societe
@@ -243,6 +248,9 @@ func (a *AccountStore) SignUp(email, password, role, name string, consent bool,
 		ConsentAt:      time.Now(),
 		SessionsBefore: time.Unix(0, 0),
 		CreatedAt:      time.Now(),
+		// Sprint 31 : notifications client activees par defaut.
+		NotifyJobDone:    true,
+		NotifyLowCredits: true,
 	}
 	if ci != nil {
 		u.AccountType = "societe"
@@ -389,7 +397,8 @@ func (a *AccountStore) SellerIDForToken(token string) string {
 func (a *AccountStore) Restore(id, email, pwHash, role, display, orgID, tokenHash string,
 	consentAt, sessionsBefore time.Time, deletedAt *time.Time,
 	accountType, companyName, siret, vat, companyAddr string,
-	siretVerified bool, siretCheckedAt *time.Time, emailVerified bool) {
+	siretVerified bool, siretCheckedAt *time.Time, emailVerified bool,
+	notifyJobDone, notifyLowCredits bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if deletedAt != nil {
@@ -402,6 +411,9 @@ func (a *AccountStore) Restore(id, email, pwHash, role, display, orgID, tokenHas
 		VatNumber: vat, CompanyAddress: companyAddr,
 		SiretVerified: siretVerified, SiretCheckedAt: siretCheckedAt,
 		EmailVerified: emailVerified,
+		// Sprint 31 : preferences de notifications.
+		NotifyJobDone:    notifyJobDone,
+		NotifyLowCredits: notifyLowCredits,
 	}
 	if u.AccountType == "" {
 		u.AccountType = "particulier"
@@ -981,6 +993,31 @@ func (a *AccountStore) handleProfile(w http.ResponseWriter, r *http.Request, u *
 	display := u.DisplayName
 	a.mu.Unlock()
 	a.store.SaveUserProfile(u.ID, display)
+	writeJSON(w, u)
+}
+
+// POST /auth/notifications {notify_job_done, notify_low_credits} :
+// preferences de notifications e-mail du compte (Sprint 31). Les
+// notifications sont actives par defaut ; la console client permet
+// de les desactiver separement.
+func (a *AccountStore) handleNotifications(w http.ResponseWriter, r *http.Request, u *User) {
+	if r.Method != http.MethodPost {
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req struct {
+		NotifyJobDone    bool `json:"notify_job_done"`
+		NotifyLowCredits bool `json:"notify_low_credits"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid")
+		return
+	}
+	a.mu.Lock()
+	u.NotifyJobDone = req.NotifyJobDone
+	u.NotifyLowCredits = req.NotifyLowCredits
+	a.mu.Unlock()
+	a.store.SaveUserNotifications(u.ID, u.NotifyJobDone, u.NotifyLowCredits)
 	writeJSON(w, u)
 }
 

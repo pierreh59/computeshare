@@ -623,8 +623,9 @@ func (s *Store) SaveUser(u *User, pwHash, tokenHash string) {
 		(id, email, password_hash, role, display_name, org_id,
 		 seller_token_hash, created_at, consent_at, sessions_before,
 		 account_type, company_name, siret, vat_number,
-		 company_address, siret_verified, email_verified)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+		 company_address, siret_verified, email_verified,
+		 notify_job_done, notify_low_credits)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
 		ON CONFLICT (id) DO UPDATE SET
 		  email=EXCLUDED.email,
 		  password_hash=EXCLUDED.password_hash,
@@ -633,13 +634,16 @@ func (s *Store) SaveUser(u *User, pwHash, tokenHash string) {
 		  seller_token_hash=EXCLUDED.seller_token_hash,
 		  consent_at=EXCLUDED.consent_at,
 		  sessions_before=EXCLUDED.sessions_before,
-		  email_verified=EXCLUDED.email_verified`,
+		  email_verified=EXCLUDED.email_verified,
+		  notify_job_done=EXCLUDED.notify_job_done,
+		  notify_low_credits=EXCLUDED.notify_low_credits`,
 		u.ID, u.Email, pwHash, u.Role, u.DisplayName, u.OrgID,
 		tokenHash, u.CreatedAt,
 		nullTime(u.ConsentAt), nullTime(u.SessionsBefore),
 		u.AccountType, nullStr(u.CompanyName), nullStr(u.Siret),
 		nullStr(u.VatNumber), nullStr(u.CompanyAddress),
-		u.SiretVerified, u.EmailVerified)
+		u.SiretVerified, u.EmailVerified,
+		u.NotifyJobDone, u.NotifyLowCredits)
 	if err != nil {
 		log.Printf("store.SaveUser: %v", err)
 	}
@@ -667,6 +671,19 @@ func (s *Store) SaveUserProfile(id, name string) {
 		`UPDATE runtime_users SET display_name=$2 WHERE id=$1`, id, name)
 	if err != nil {
 		log.Printf("store.SaveUserProfile: %v", err)
+	}
+}
+
+// SaveUserNotifications enregistre les preferences de notifications
+func (s *Store) SaveUserNotifications(id string, jobDone, lowCredits bool) {
+	if !s.enabled() {
+		return
+	}
+	_, err := s.db.Exec(
+		`UPDATE runtime_users SET notify_job_done=$2, notify_low_credits=$3 WHERE id=$1`,
+		id, jobDone, lowCredits)
+	if err != nil {
+		log.Printf("store.SaveUserNotifications: %v", err)
 	}
 }
 
@@ -736,7 +753,8 @@ func (s *Store) LoadUsers(a *AccountStore) {
 		COALESCE(company_name, ''), COALESCE(siret, ''),
 		COALESCE(vat_number, ''), COALESCE(company_address, ''),
 		siret_verified, siret_checked_at,
-		COALESCE(email_verified, false)
+		COALESCE(email_verified, false),
+		COALESCE(notify_job_done, true), COALESCE(notify_low_credits, true)
 		FROM runtime_users WHERE deleted_at IS NULL AND password_hash <> ''`)
 	if err != nil {
 		log.Printf("store.LoadUsers: %v", err)
@@ -749,14 +767,17 @@ func (s *Store) LoadUsers(a *AccountStore) {
 		var consentAt, sessionsBefore time.Time
 		var deletedAt, siretCheckedAt *time.Time
 		var siretVerified, emailVerified bool
+		var notifyJobDone, notifyLowCredits bool
 		if rows.Scan(&id, &email, &pwHash, &role, &display, &orgID, &tokenHash,
 			&consentAt, &sessionsBefore, &deletedAt,
 			&accType, &companyName, &siret, &vat, &companyAddr,
-			&siretVerified, &siretCheckedAt, &emailVerified) == nil {
+			&siretVerified, &siretCheckedAt, &emailVerified,
+			&notifyJobDone, &notifyLowCredits) == nil {
 			a.Restore(id, email, pwHash, role, display, orgID, tokenHash,
 				consentAt, sessionsBefore, deletedAt,
 				accType, companyName, siret, vat, companyAddr,
-				siretVerified, siretCheckedAt, emailVerified)
+				siretVerified, siretCheckedAt, emailVerified,
+				notifyJobDone, notifyLowCredits)
 		}
 	}
 }

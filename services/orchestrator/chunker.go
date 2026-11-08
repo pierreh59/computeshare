@@ -307,6 +307,17 @@ func (c *Chunker) Complete(chunkID, nodeID, outcome, sha, detail string, duratio
 					ch.ComputeHours, ch.ID)
 			}
 			c.store.SaveChunk(ch)
+			// Sprint 31 : notifications client - job termine et credits
+			// bas (l envoi Brevo part en goroutine, jamais bloquant).
+			if notifier != nil && ch.OrgID != "" {
+				if d, f, cz, fin := c.jobFinishedStats(ch.JobID); fin {
+					cost, _, _ := c.billing.JobCost(ch.OrgID, ch.JobID)
+					notifier.JobFinished(ch.OrgID, ch.JobID, d, f, cz, cost)
+				}
+				if outcome == "ok" {
+					notifier.MaybeLowCredits(ch.OrgID, c.billing.Balance(ch.OrgID))
+				}
+			}
 			return true
 		}
 	}
@@ -338,6 +349,14 @@ func (c *Chunker) rescheduleLoop() {
 			if ch.Attempts >= maxChunkAttempts {
 				ch.Status = "failed"
 				c.store.SaveChunk(ch)
+				// Sprint 31 : si c etait le dernier chunk du job, le
+				// client est prevenu (e-mail job termine).
+				if notifier != nil && ch.OrgID != "" {
+					if d, f, cz, fin := c.jobFinishedStats(ch.JobID); fin {
+						cost, _, _ := c.billing.JobCost(ch.OrgID, ch.JobID)
+						notifier.JobFinished(ch.OrgID, ch.JobID, d, f, cz, cost)
+					}
+				}
 				continue
 			}
 			if next := pickNode(online, ch); next != "" {
@@ -445,6 +464,31 @@ func seqOf(id string) int {
 }
 
 // JobStatus resume l'avancement d'un job (comptages par statut).
+// jobFinishedStats (Sprint 31) : sous le verrou du chunker, compte les
+// statuts terminaux d un job et dit s il est ENTIEREMENT termine
+// (aucun chunk en file ni en cours). Sert a declencher l e-mail
+// "job termine" au moment ou le dernier chunk est rendu.
+func (c *Chunker) jobFinishedStats(jobID string) (done, failed, canceled int, finished bool) {
+	queued := 0
+	for _, ch := range c.chunks {
+		if ch.JobID != jobID {
+			continue
+		}
+		switch ch.Status {
+		case "done":
+			done++
+		case "failed":
+			failed++
+		case "canceled":
+			canceled++
+		case "queued", "running":
+			queued++
+		}
+	}
+	finished = queued == 0 && (done+failed+canceled) > 0
+	return done, failed, canceled, finished
+}
+
 func (c *Chunker) JobStatus(jobID string) map[string]int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
