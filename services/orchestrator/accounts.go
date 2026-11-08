@@ -80,11 +80,19 @@ type AccountStore struct {
 	authTokens   map[string]*authToken // cle : SHA-256 du jeton brut
 	sentCooldown map[string]time.Time   // cle : kind + "|" + email
 	emails       *Emailer
+	// Audit 8 nov. : anti-spam d'INSCRIPTIONS par IP (le throttle
+	// existant ne couvrait que le login).
+	signupIPs map[string]signupAttempt
 }
 
 type loginAttempt struct {
 	fails    int
 	blockedT time.Time
+}
+
+type signupAttempt struct {
+	count int
+	reset time.Time
 }
 
 func NewAccountStore(store *Store, orgs *OrgStore) *AccountStore {
@@ -103,6 +111,7 @@ func NewAccountStore(store *Store, orgs *OrgStore) *AccountStore {
 		attempts:     make(map[string]loginAttempt),
 		authTokens:   make(map[string]*authToken),
 		sentCooldown: make(map[string]time.Time),
+		signupIPs:    make(map[string]signupAttempt),
 	}
 }
 
@@ -168,6 +177,31 @@ func validVat(v string) bool {
 
 const maxLoginFails = 5
 const loginBlockTime = 15 * time.Minute
+
+// Audit du 8 nov. : anti-spam d'inscriptions par IP (fenetre glissante
+// d'une heure). Un faux positif possible (IP partagee / NAT) est
+// preferable au spam de comptes en bêta publique.
+const maxSignupsPerIP = 10
+const signupWindow = 1 * time.Hour
+
+// signupBloque enregistre une tentative d'inscription depuis ip et
+// indique si elle depasse le quota de la fenetre.
+func (a *AccountStore) signupBloque(ip string) bool {
+	if ip == "" {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	now := time.Now()
+	sc, ok := a.signupIPs[ip]
+	if !ok || now.After(sc.reset) {
+		a.signupIPs[ip] = signupAttempt{count: 1, reset: now.Add(signupWindow)}
+		return false
+	}
+	sc.count++
+	a.signupIPs[ip] = sc
+	return sc.count > maxSignupsPerIP
+}
 
 // SignUp cree un compte. consent = acceptation des CGU + politique de
 // confidentialite (RGPD art. 6/7). Retourne l'utilisateur, la cle API
@@ -768,6 +802,11 @@ func writeErr(w http.ResponseWriter, code int, msg string) {
 func (a *AccountStore) handleSignup(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	// Audit du 8 nov. : anti-spam d'inscriptions par IP.
+	if a.signupBloque(clientIP(r)) {
+		writeErr(w, http.StatusTooManyRequests, "trop d'inscriptions depuis cette adresse, reessayez plus tard")
 		return
 	}
 	var req struct {

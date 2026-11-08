@@ -12,7 +12,7 @@ import (
 
 // orchestratorVersion : version de l'orchestrateur, affichee sur le
 // dashboard admin et dans /healthz. A incrementer a chaque sprint.
-const orchestratorVersion = "v0.25.0"
+const orchestratorVersion = "v0.25.1"
 
 func main() {
 	port := os.Getenv("PORT")
@@ -52,6 +52,12 @@ func main() {
 	})
 	http.HandleFunc("/nodes", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, registry.OnlineNodes())
+	})
+
+	// Audit du 8 nov. : la racine de l'API redirige vers la vitrine
+	// au lieu d'un 404 nu (les routes specifiques restent prioritaires).
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://computeshare.fr", http.StatusFound)
 	})
 
 	// Sprint 15 (LAI-57) : comptes utilisateurs - inscription libre et
