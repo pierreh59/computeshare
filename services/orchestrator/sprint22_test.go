@@ -14,12 +14,16 @@ func TestCompleteIdempotentEtPayeLeRapporteur(t *testing.T) {
 	reg.Register("node-b", "GPU B", "prosumer", "europe", "fp-b", false, false)
 
 	job := Job{ID: "job-s22-a", Command: "echo", TaskCount: 1, Zone: "europe"}
-	if chunker.Submit(job, "") == nil {
+	submitted := chunker.Submit(job, "")
+	if len(submitted) == 0 {
 		t.Fatal("soumission refusee")
 	}
-	ch := chunker.NextFor("node-a")
+	// Le chunk peut etre attribue a node-a OU node-b (round-robin sur
+	// un map, ordre aleatoire) : on reclame depuis son vrai titulaire,
+	// sinon ce test echoue de maniere intermitente.
+	ch := chunker.NextFor(submitted[0].NodeID)
 	if ch == nil {
-		t.Fatal("chunk non livre a node-a")
+		t.Fatal("chunk non livre a son titulaire")
 	}
 
 	// Simulation : le chunk a ete re-attribue a node-b pendant
