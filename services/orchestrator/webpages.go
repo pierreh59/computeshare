@@ -359,6 +359,14 @@ const meHTML = `<!DOCTYPE html>
  <label>Nombre de tâches</label><input id="count" value="1">
  <label>Nom du fichier résultat (ex: out.mp4)</label><input id="outname" value="out.mp4">
  <label>Délai maximum par tâche (secondes)</label><input id="tmo" value="600">
+ <div id="assetRow" style="display:none">
+  <h2 style="margin-top:18px">Fichiers d'entrée (optionnel)</h2>
+  <p class="muted">Téléversez vos fichiers ici : ils seront placés dans /work du conteneur sous leur nom exact (100 Mo max par fichier). Ils sont supprimés du PC du fournisseur à la fin du job.</p>
+  <input type="file" id="assetfile" style="color:#e2e8f0">
+  <button class="gray" onclick="uploadAsset()">Téléverser</button>
+  <div id="assetmsg"></div>
+  <div id="assetlist"></div>
+ </div>
  <button onclick="submitJob()">Soumettre</button>
  <div id="msg"></div>
 </div>
@@ -384,6 +392,7 @@ const meHTML = `<!DOCTYPE html>
 if(!requireRole('client'))throw new Error('redirection');
 document.getElementById('who').textContent=user().email;
 renderAccountCard();
+renderAssets();
 refreshBalance();refreshUsage();
 function refreshBalance(){
  api('/v1/balance').then(function(b){
@@ -408,8 +417,46 @@ function refreshUsage(){
 function rtChange(){
  var c=document.getElementById('rt').value==='container';
  document.getElementById('imgRow').style.display=c?'block':'none';
+ document.getElementById('assetRow').style.display=c?'block':'none';
  document.getElementById('cmd').value=c?'sh':'ffmpeg.exe';
 }
+// Sprint 27b : upload d'assets d'entree depuis la console (avant
+// l'API, c'etait reserve a curl). Le fichier est envoye brut dans le
+// corps de la requete, le nom passe en parametre d'URL.
+var mesAssets=[];
+function uploadAsset(){
+ var f=document.getElementById('assetfile').files[0];
+ if(!f){document.getElementById('assetmsg').innerHTML='<p class="err">Choisissez d\'abord un fichier.</p>';return;}
+ if(f.size>100*1024*1024){document.getElementById('assetmsg').innerHTML='<p class="err">Fichier trop volumineux (100 Mo max).</p>';return;}
+ document.getElementById('assetmsg').innerHTML='<p class="muted">Téléversement en cours...</p>';
+ fetch('/v1/assets?filename='+encodeURIComponent(f.name),{
+  method:'POST',
+  headers:{'Authorization':'Bearer '+sess(),'Content-Type':'application/octet-stream'},
+  body:f
+ }).then(function(r){return r.text().then(function(t){
+  var j;try{j=JSON.parse(t);}catch(e){j=null;}
+  if(!r.ok){throw new Error((j&&j.error)||t||('HTTP '+r.status));}
+  return j;});
+ }).then(function(a){
+  mesAssets.push({asset_id:a.asset_id,filename:f.name,size_bytes:a.size_bytes});
+  document.getElementById('assetfile').value='';
+  document.getElementById('assetmsg').innerHTML='<p class="ok">✓ '+esc(f.name)+' téléversé ('+a.size_bytes+' octets).</p>';
+  renderAssets();
+ }).catch(function(e){document.getElementById('assetmsg').innerHTML='<p class="err">Erreur : '+esc(e.message)+'</p>';});
+}
+function renderAssets(){
+ var h;
+ if(!mesAssets.length){h='<p class="muted">Aucun fichier joint. Les fichiers téléversés seront attachés à votre prochain job conteneur.</p>';}
+ else{
+  h='<table><tr><th>Fichier</th><th>Taille</th><th></th></tr>';
+  mesAssets.forEach(function(a,i){
+   h+='<tr><td>'+esc(a.filename)+'</td><td>'+a.size_bytes+' octets</td><td><button class="gray" onclick="removeAsset('+i+')">Retirer</button></td></tr>';
+  });
+  h+='</table>';
+ }
+ document.getElementById('assetlist').innerHTML=h;
+}
+function removeAsset(i){mesAssets.splice(i,1);renderAssets();}
 function submitJob(){
  var id=document.getElementById('jid').value.trim();
  if(!id){document.getElementById('msg').innerHTML='<p class="err">Choisissez un ID de job.</p>';return;}
@@ -419,7 +466,10 @@ function submitJob(){
   timeout_secs:parseInt(document.getElementById('tmo').value)||600,
   output_name:document.getElementById('outname').value.trim()};
  var rt=document.getElementById('rt').value;
- if(rt==='container'){body.runtime='container';body.image=document.getElementById('img').value.trim();}
+ if(rt==='container'){body.runtime='container';body.image=document.getElementById('img').value.trim();
+  // Sprint 27b : les fichiers televerses ci-dessus sont attaches
+  // au job (injection dans /work du conteneur, sprint 27).
+  if(mesAssets.length){body.asset_ids=mesAssets.map(function(a){return a.asset_id;});}}
  api('/v1/jobs',{method:'POST',body:JSON.stringify(body)}).then(function(r){
   document.getElementById('msg').innerHTML='<p class="ok">Job '+esc(r.job_id)+' soumis ('+r.task_count+' tâches).</p>';
   document.getElementById('jid').value='';
