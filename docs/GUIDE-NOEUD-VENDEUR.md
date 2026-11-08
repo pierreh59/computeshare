@@ -53,10 +53,13 @@ conteneur (les mieux payes). Points importants :
   allowlist (commandes simples), mais ne recoit pas de jobs
   conteneur ni GPU.
 - Pour un fonctionnement totalement invisible, ouvrez une fois
-  les reglages de Docker Desktop (Settings > General) :
-  cochez "Start Docker Desktop when you sign in" et DECOCHEZ
-  "Open Docker Dashboard at startup". Docker demarrera avec votre
-  session Windows sans jamais ouvrir de fenetre.
+  les reglages de Docker Desktop (Settings > General) et cochez
+  "Start Docker Desktop when you sign in". Docker demarrera avec
+  votre session Windows sans jamais ouvrir de fenetre. Le reglage
+  "Open Docker Dashboard at startup" est desactive automatiquement
+  par l'application avant sa premiere relance silencieuse (avec
+  sauvegarde de vos reglages Docker) : la fenetre Docker ne
+  s'affiche pas.
 - Si le PC a un GPU NVIDIA a jour, l'application verifie au
   demarrage que le GPU est accessible depuis les conteneurs ; le
   noeud est alors marque "GPU pret" et recoit les jobs GPU

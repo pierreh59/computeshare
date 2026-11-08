@@ -73,6 +73,59 @@ fn docker_daemon_pret() -> bool {
         .unwrap_or(false)
 }
 
+/// Sprint 28c : desactive le reglage Docker "Open Docker Dashboard
+/// at startup" (cle openUIOnStartupDisabled dans settings-store.json,
+/// settings.json sur les versions anciennes) pour que notre relance
+/// silencieuse n'ouvre AUCUNE fenetre. A appeler uniquement quand le
+/// daemon est arrete : Docker relit ses reglages au demarrage et
+/// reecrirait le fichier a son arret. Non fatal : en cas d'echec on
+/// relance quand meme Docker Desktop. Retourne true si un reglage a
+/// ete modifie (pour la trace).
+#[cfg(windows)]
+fn docker_desktop_desactive_fenetre() -> bool {
+    let appdata = match std::env::var("APPDATA") {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let mut modifie = false;
+    for nom in ["settings-store.json", "settings.json"] {
+        let chemin = std::path::PathBuf::from(&appdata)
+            .join("Docker")
+            .join(nom);
+        let contenu = match std::fs::read_to_string(&chemin) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let mut racine: serde_json::Value = match serde_json::from_str(&contenu) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let deja = racine
+            .get("openUIOnStartupDisabled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if deja {
+            continue;
+        }
+        // Sauvegarde unique avant la premiere modification.
+        let bak = chemin.with_extension("json.computeshare-bak");
+        if !bak.exists() {
+            let _ = std::fs::copy(&chemin, &bak);
+        }
+        if let Some(obj) = racine.as_object_mut() {
+            obj.insert(
+                "openUIOnStartupDisabled".to_string(),
+                serde_json::Value::Bool(true),
+            );
+            if let Ok(nouveau) = serde_json::to_string_pretty(&racine) {
+                let _ = std::fs::write(&chemin, nouveau);
+                modifie = true;
+            }
+        }
+    }
+    modifie
+}
+
 /// Sprint 19 : execution conteneur. Windows uniquement, via docker.exe
 /// (Docker Desktop). Le dossier sandbox Windows est monte directement
 /// sur /work (Docker Desktop accepte les chemins Windows en /).
@@ -113,6 +166,14 @@ pub(crate) fn run_container_chunk(
                 "{} daemon docker arrete : relance silencieuse de Docker Desktop",
                 spec.chunk_id
             ));
+            // Sprint 28c : d'abord eviter que Docker ouvre son
+            // dashboard (fenetre) au demarrage.
+            if docker_desktop_desactive_fenetre() {
+                crate::node::trace(&format!(
+                    "{} reglage Docker applique : pas de fenetre au demarrage",
+                    spec.chunk_id
+                ));
+            }
             let _ = Command::new(&docker_desktop_exe())
                 .creation_flags(CREATE_NO_WINDOW)
                 .stdin(Stdio::null())
