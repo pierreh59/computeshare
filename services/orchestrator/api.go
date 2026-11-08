@@ -13,12 +13,21 @@ import (
 // POST /v1/jobs : soumet un job, decoupe en chunks par le chunker.
 // LAI-32 : refused si l'organisation n'a plus de credits prepayes.
 // Sprint 27 : chaque asset reference doit appartenir a l'org.
-func v1Submit(orgs *OrgStore, assets *AssetStore, c *Chunker, b *Billing) http.HandlerFunc {
+func v1Submit(orgs *OrgStore, assets *AssetStore, c *Chunker, b *Billing, accounts *AccountStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		org := orgs.Authenticate(r)
 		if org == nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
+		}
+		// Sprint 29 : un compte dont l adresse e-mail n est pas
+		// verifiee est limite : aucune soumission de job (le lien de
+		// verification est renvoyable depuis la console).
+		if accounts != nil {
+			if u := accounts.UserByOrg(org.ID); u != nil && !u.EmailVerified {
+				http.Error(w, "verifiez votre adresse e-mail avant de soumettre un job : cliquez sur le lien recu par e-mail (renvoyable depuis votre console)", http.StatusForbidden)
+				return
+			}
 		}
 		if !b.HasCredits(org.ID) {
 			http.Error(w, "insufficient credits", http.StatusPaymentRequired)

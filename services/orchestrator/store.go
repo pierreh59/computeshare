@@ -55,6 +55,79 @@ func NewStore() *Store {
 
 func (s *Store) enabled() bool { return s != nil && s.db != nil }
 
+// ------------------------------------------------------------
+// Sprint 29 : verification d adresse e-mail + reinitialisation de
+// mot de passe (jetons a usage unique, 1 heure).
+// ------------------------------------------------------------
+
+// SaveUserEmailVerified : passage en adresse verifiee.
+func (s *Store) SaveUserEmailVerified(id string, verified bool) {
+	if !s.enabled() {
+		return
+	}
+	if _, err := s.db.Exec(
+		`UPDATE runtime_users SET email_verified=$2 WHERE id=$1`, id, verified); err != nil {
+		log.Printf("store.SaveUserEmailVerified: %v", err)
+	}
+}
+
+// SaveAuthToken : jeton de verification / reinitialisation. Seul le
+// SHA-256 du jeton brut est stocke.
+func (s *Store) SaveAuthToken(id, userID, kind, tokenHash string, expiresAt time.Time) {
+	if !s.enabled() {
+		return
+	}
+	_, err := s.db.Exec(`INSERT INTO auth_tokens
+		(id, user_id, kind, token_hash, expires_at)
+		VALUES ($1,$2,$3,$4,$5)
+		ON CONFLICT (id) DO NOTHING`,
+		id, userID, kind, tokenHash, expiresAt)
+	if err != nil {
+		log.Printf("store.SaveAuthToken: %v", err)
+	}
+}
+
+// DeleteAuthToken : jeton consomme.
+func (s *Store) DeleteAuthToken(id string) {
+	if !s.enabled() {
+		return
+	}
+	if _, err := s.db.Exec(`DELETE FROM auth_tokens WHERE id=$1`, id); err != nil {
+		log.Printf("store.DeleteAuthToken: %v", err)
+	}
+}
+
+// AuthTokenRow : jeton recharge au demarrage.
+type AuthTokenRow struct {
+	ID        string
+	UserID    string
+	Kind      string
+	Hash      string
+	ExpiresAt time.Time
+}
+
+// LoadAuthTokens recharge les jetons non expires.
+func (s *Store) LoadAuthTokens() []AuthTokenRow {
+	var out []AuthTokenRow
+	if !s.enabled() {
+		return out
+	}
+	rows, err := s.db.Query(`SELECT id, user_id, kind, token_hash, expires_at
+		FROM auth_tokens WHERE used_at IS NULL AND expires_at > now()`)
+	if err != nil {
+		log.Printf("store.LoadAuthTokens: %v", err)
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var row AuthTokenRow
+		if rows.Scan(&row.ID, &row.UserID, &row.Kind, &row.Hash, &row.ExpiresAt) == nil {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
 func nullStr(s string) interface{} {
 	if s == "" {
 		return nil
@@ -546,8 +619,8 @@ func (s *Store) SaveUser(u *User, pwHash, tokenHash string) {
 		(id, email, password_hash, role, display_name, org_id,
 		 seller_token_hash, created_at, consent_at, sessions_before,
 		 account_type, company_name, siret, vat_number,
-		 company_address, siret_verified)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+		 company_address, siret_verified, email_verified)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
 		ON CONFLICT (id) DO UPDATE SET
 		  email=EXCLUDED.email,
 		  password_hash=EXCLUDED.password_hash,
@@ -555,13 +628,14 @@ func (s *Store) SaveUser(u *User, pwHash, tokenHash string) {
 		  org_id=EXCLUDED.org_id,
 		  seller_token_hash=EXCLUDED.seller_token_hash,
 		  consent_at=EXCLUDED.consent_at,
-		  sessions_before=EXCLUDED.sessions_before`,
+		  sessions_before=EXCLUDED.sessions_before,
+		  email_verified=EXCLUDED.email_verified`,
 		u.ID, u.Email, pwHash, u.Role, u.DisplayName, u.OrgID,
 		tokenHash, u.CreatedAt,
 		nullTime(u.ConsentAt), nullTime(u.SessionsBefore),
 		u.AccountType, nullStr(u.CompanyName), nullStr(u.Siret),
 		nullStr(u.VatNumber), nullStr(u.CompanyAddress),
-		u.SiretVerified)
+		u.SiretVerified, u.EmailVerified)
 	if err != nil {
 		log.Printf("store.SaveUser: %v", err)
 	}
@@ -657,7 +731,8 @@ func (s *Store) LoadUsers(a *AccountStore) {
 		COALESCE(account_type, 'particulier'),
 		COALESCE(company_name, ''), COALESCE(siret, ''),
 		COALESCE(vat_number, ''), COALESCE(company_address, ''),
-		siret_verified, siret_checked_at
+		siret_verified, siret_checked_at,
+		COALESCE(email_verified, false)
 		FROM runtime_users WHERE deleted_at IS NULL AND password_hash <> ''`)
 	if err != nil {
 		log.Printf("store.LoadUsers: %v", err)
@@ -669,15 +744,15 @@ func (s *Store) LoadUsers(a *AccountStore) {
 		var accType, companyName, siret, vat, companyAddr string
 		var consentAt, sessionsBefore time.Time
 		var deletedAt, siretCheckedAt *time.Time
-		var siretVerified bool
+		var siretVerified, emailVerified bool
 		if rows.Scan(&id, &email, &pwHash, &role, &display, &orgID, &tokenHash,
 			&consentAt, &sessionsBefore, &deletedAt,
 			&accType, &companyName, &siret, &vat, &companyAddr,
-			&siretVerified, &siretCheckedAt) == nil {
+			&siretVerified, &siretCheckedAt, &emailVerified) == nil {
 			a.Restore(id, email, pwHash, role, display, orgID, tokenHash,
 				consentAt, sessionsBefore, deletedAt,
 				accType, companyName, siret, vat, companyAddr,
-				siretVerified, siretCheckedAt)
+				siretVerified, siretCheckedAt, emailVerified)
 		}
 	}
 }

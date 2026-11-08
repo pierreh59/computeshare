@@ -43,7 +43,7 @@ func TestSoumissionAssetEtranger(t *testing.T) {
 	body := `{"id":"job-s27-vol","runtime":"allowlist","command":"echo","task_count":1,"asset_ids":["` + id + `"]}`
 
 	// L'org B reference l'asset de A : refuse.
-	sub := v1Submit(orgs, assets, chunker, billing)
+	sub := v1Submit(orgs, assets, chunker, billing, nil)
 	reqB := httptest.NewRequest("POST", "/v1/jobs", bytes.NewReader([]byte(body)))
 	reqB.Header.Set("Authorization", "Bearer "+keyB)
 	recB := httptest.NewRecorder()

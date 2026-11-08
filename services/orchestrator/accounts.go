@@ -23,6 +23,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -44,6 +45,11 @@ type User struct {
 	SessionsBefore time.Time  `json:"-"`                     // epoque : sessions anterieures revoquees
 	DeletedAt      *time.Time `json:"deleted_at,omitempty"`  // compte supprime (anonymise)
 	CreatedAt      time.Time  `json:"created_at"`
+
+	// Sprint 29 : adresse e-mail verifiee (clic sur le lien recu par
+	// e-mail). Un compte non verifie est limite : pas de soumission
+	// de job.
+	EmailVerified bool `json:"email_verified"`
 
 	// Sprint 15d : particulier vs societe (LAI-61). Les champs societe
 	// sont vides pour un particulier.
@@ -67,6 +73,13 @@ type AccountStore struct {
 	store        *Store
 	secret       []byte
 	attempts     map[string]loginAttempt // anti force brute (login)
+
+	// Sprint 29 : jetons de verification d email / reinitialisation
+	// de mot de passe (memoire, miroir en BDD), anti-spam d envoi et
+	// service d e-mails transactionnels (Brevo).
+	authTokens   map[string]*authToken // cle : SHA-256 du jeton brut
+	sentCooldown map[string]time.Time   // cle : kind + "|" + email
+	emails       *Emailer
 }
 
 type loginAttempt struct {
@@ -88,6 +101,8 @@ func NewAccountStore(store *Store, orgs *OrgStore) *AccountStore {
 		store:        store,
 		secret:       []byte(secret),
 		attempts:     make(map[string]loginAttempt),
+		authTokens:   make(map[string]*authToken),
+		sentCooldown: make(map[string]time.Time),
 	}
 }
 
@@ -340,7 +355,7 @@ func (a *AccountStore) SellerIDForToken(token string) string {
 func (a *AccountStore) Restore(id, email, pwHash, role, display, orgID, tokenHash string,
 	consentAt, sessionsBefore time.Time, deletedAt *time.Time,
 	accountType, companyName, siret, vat, companyAddr string,
-	siretVerified bool, siretCheckedAt *time.Time) {
+	siretVerified bool, siretCheckedAt *time.Time, emailVerified bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if deletedAt != nil {
@@ -352,6 +367,7 @@ func (a *AccountStore) Restore(id, email, pwHash, role, display, orgID, tokenHas
 		AccountType: accountType, CompanyName: companyName, Siret: siret,
 		VatNumber: vat, CompanyAddress: companyAddr,
 		SiretVerified: siretVerified, SiretCheckedAt: siretCheckedAt,
+		EmailVerified: emailVerified,
 	}
 	if u.AccountType == "" {
 		u.AccountType = "particulier"
@@ -365,6 +381,222 @@ func (a *AccountStore) Restore(id, email, pwHash, role, display, orgID, tokenHas
 	if tokenHash != "" {
 		a.sellerTokens[tokenHash] = id
 	}
+}
+
+// ------------------------------------------------------------
+// Sprint 29 : verification d adresse e-mail + reinitialisation du
+// mot de passe. Jetons a usage unique valables 1 heure (decision
+// produit). Seul le SHA-256 du jeton est stocke (BDD et memoire).
+// ------------------------------------------------------------
+
+type authToken struct {
+	id        string
+	userID    string
+	kind      string // verify_email | reset_password
+	hash      string // SHA-256 hex du jeton brut
+	expiresAt time.Time
+}
+
+const authTokenTTL = time.Hour
+const sendCooldown = time.Minute
+
+// newAuthToken genere un jeton (brut renvoye a l appelant), le
+// memorise et le persiste. email sert uniquement a l anti-spam.
+func (a *AccountStore) newAuthToken(userID, kind, email string) string {
+	raw := randomHex(32)
+	t := &authToken{
+		id:        "tok-" + randomHex(4),
+		userID:    userID,
+		kind:      kind,
+		hash:      hashKey(raw),
+		expiresAt: time.Now().Add(authTokenTTL),
+	}
+	a.mu.Lock()
+	a.authTokens[t.hash] = t
+	a.sentCooldown[kind+"|"+email] = time.Now()
+	a.mu.Unlock()
+	a.store.SaveAuthToken(t.id, t.userID, t.kind, t.hash, t.expiresAt)
+	return raw
+}
+
+// cooldownRecent : true si un envoi de ce type a deja eu lieu il y a
+// moins d une minute (anti-spam de renvoi).
+func (a *AccountStore) cooldownRecent(kind, email string) bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	last, ok := a.sentCooldown[kind+"|"+email]
+	return ok && time.Since(last) < sendCooldown
+}
+
+// consumeAuthToken verifie un jeton brut (present, bon type, non
+// expire, compte vivant) et le consomme : usage unique.
+func (a *AccountStore) consumeAuthToken(raw, kind string) *User {
+	if raw == "" || len(raw) > 128 {
+		return nil
+	}
+	hash := hashKey(raw)
+	a.mu.Lock()
+	t, ok := a.authTokens[hash]
+	if !ok || t.kind != kind || time.Now().After(t.expiresAt) {
+		a.mu.Unlock()
+		return nil
+	}
+	delete(a.authTokens, hash)
+	u := a.users[t.userID]
+	a.mu.Unlock()
+	if u == nil || u.DeletedAt != nil {
+		return nil
+	}
+	a.store.DeleteAuthToken(t.id)
+	return u
+}
+
+// RestoreAuthToken recharge un jeton actif depuis la BDD (demarrage).
+func (a *AccountStore) RestoreAuthToken(id, userID, kind, hash string, expiresAt time.Time) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.authTokens[hash] = &authToken{
+		id: id, userID: userID, kind: kind, hash: hash, expiresAt: expiresAt,
+	}
+}
+
+// IssueVerification cree et envoie (ou journalise) un jeton de
+// verification d adresse. Sans effet si l adresse est deja verifiee.
+func (a *AccountStore) IssueVerification(u *User) {
+	if u == nil || u.DeletedAt != nil {
+		return
+	}
+	a.mu.RLock()
+	verified := u.EmailVerified
+	a.mu.RUnlock()
+	if verified {
+		return
+	}
+	raw := a.newAuthToken(u.ID, "verify_email", u.Email)
+	if a.emails != nil {
+		a.emails.SendVerification(u.Email, raw)
+	}
+}
+
+// UserByEmail : compte vivant par adresse (insensible a la casse).
+func (a *AccountStore) UserByEmail(email string) *User {
+	email = strings.ToLower(strings.TrimSpace(email))
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	id, ok := a.byEmail[email]
+	if !ok {
+		return nil
+	}
+	return a.users[id]
+}
+
+// GET /verify?token=X : clic depuis l e-mail. Page HTML autonome.
+func (a *AccountStore) handleVerify(w http.ResponseWriter, r *http.Request) {
+	u := a.consumeAuthToken(r.URL.Query().Get("token"), "verify_email")
+	if u == nil {
+		writeVerifyPage(w, false, "")
+		return
+	}
+	a.mu.Lock()
+	u.EmailVerified = true
+	a.mu.Unlock()
+	a.store.SaveUserEmailVerified(u.ID, true)
+	dashLog("email_verified", u.Email+" a verifie son adresse")
+	writeVerifyPage(w, true, u.Email)
+}
+
+func writeVerifyPage(w http.ResponseWriter, ok bool, email string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	tete := "<!DOCTYPE html><html lang=\"fr\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>ComputeShare - Verification</title></head><body style=\"font-family:Arial,Helvetica,sans-serif;background:#f8fafc;color:#0f172a\"><div style=\"max-width:520px;margin:48px auto;background:#ffffff;border-radius:12px;padding:32px;border:1px solid #e2e8f0\">"
+	pied := "</div></body></html>"
+	if ok {
+		fmt.Fprintf(w, tete+"<h2>Adresse verifiee</h2><p>L adresse <b>%s</b> est confirmee. Votre compte est complet : vous pouvez soumettre des jobs.</p><p><a href=\"/login\">Se connecter</a></p>"+pied, email)
+		return
+	}
+	w.Write([]byte(tete + "<h2>Lien invalide ou expire</h2><p>Ce lien de verification a deja ete utilise ou a expire (validite : 1 heure).</p><p>Connectez-vous puis demandez un nouvel e-mail depuis votre console.</p><p><a href=\"/login\">Se connecter</a></p>" + pied))
+}
+
+// POST /auth/resend_verification (session) : renvoi de l e-mail de
+// verification, anti-spam 1 minute.
+func (a *AccountStore) handleResendVerification(w http.ResponseWriter, r *http.Request, u *User) {
+	if u.EmailVerified {
+		writeJSON(w, map[string]interface{}{"ok": true, "already_verified": true})
+		return
+	}
+	if a.cooldownRecent("verify_email", u.Email) {
+		writeErr(w, http.StatusTooManyRequests, "un e-mail vient d etre envoye, reessayez dans une minute")
+		return
+	}
+	raw := a.newAuthToken(u.ID, "verify_email", u.Email)
+	if a.emails != nil {
+		a.emails.SendVerification(u.Email, raw)
+	}
+	writeJSON(w, map[string]interface{}{"ok": true})
+}
+
+// POST /auth/forgot_password {email} : envoie un lien de
+// reinitialisation. Reponse identique que le compte existe ou non
+// (aucune divulgation d existence de compte).
+func (a *AccountStore) handleForgotPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid")
+		return
+	}
+	u := a.UserByEmail(req.Email)
+	if u == nil || a.cooldownRecent("reset_password", u.Email) {
+		writeJSON(w, map[string]interface{}{"sent": true})
+		return
+	}
+	raw := a.newAuthToken(u.ID, "reset_password", u.Email)
+	if a.emails != nil {
+		a.emails.SendReset(u.Email, raw)
+	}
+	writeJSON(w, map[string]interface{}{"sent": true})
+}
+
+// POST /auth/reset_password {token, new_password} : appele par la
+// page /reset. Revoque toutes les sessions existantes.
+func (a *AccountStore) handleResetPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req struct {
+		Token       string `json:"token"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid")
+		return
+	}
+	if !validPassword(req.NewPassword) {
+		writeErr(w, http.StatusBadRequest, "mot de passe : 8 caracteres minimum")
+		return
+	}
+	u := a.consumeAuthToken(req.Token, "reset_password")
+	if u == nil {
+		writeErr(w, http.StatusBadRequest, "lien invalide ou expire : redemandez un e-mail")
+		return
+	}
+	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	a.mu.Lock()
+	u.SessionsBefore = time.Now()
+	a.passwords[u.ID] = string(newHash)
+	a.store.SaveUserPassword(u.ID, string(newHash), u.SessionsBefore)
+	a.mu.Unlock()
+	dashLog("password_reset", u.Email+" a reinitialise son mot de passe")
+	writeJSON(w, map[string]bool{"ok": true})
 }
 
 func itoa(n int64) string {
@@ -566,6 +798,10 @@ func (a *AccountStore) handleSignup(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, code, "invalid")
 		return
 	}
+	// Sprint 29 : e-mail de verification de l adresse (asynchrone,
+	// pour ne pas ralentir la reponse d inscription).
+	go a.IssueVerification(u)
+
 	w.WriteHeader(http.StatusCreated)
 	resp := map[string]interface{}{"user": u, "session_token": session}
 	if u.Role == "client" {

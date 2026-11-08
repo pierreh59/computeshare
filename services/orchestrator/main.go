@@ -12,7 +12,7 @@ import (
 
 // orchestratorVersion : version de l'orchestrateur, affichee sur le
 // dashboard admin et dans /healthz. A incrementer a chaque sprint.
-const orchestratorVersion = "v0.23.2"
+const orchestratorVersion = "v0.24.0"
 
 func main() {
 	port := os.Getenv("PORT")
@@ -39,6 +39,10 @@ func main() {
 	setDashStore(store)
 	store.LoadAll(registry, pricing, chunker, orgs)
 	store.LoadUsers(accounts)
+	for _, t := range store.LoadAuthTokens() {
+		accounts.RestoreAuthToken(t.ID, t.UserID, t.Kind, t.Hash, t.ExpiresAt)
+	}
+	accounts.emails = NewEmailer()
 	store.LoadWallet(wallet)
 	store.LoadBilling(billing)
 	wallet.Start()
@@ -52,6 +56,14 @@ func main() {
 
 	// Sprint 15 (LAI-57) : comptes utilisateurs - inscription libre et
 	// connexion, cote clients ET cote vendeurs.
+	// Sprint 29 : verification email + reinitialisation mot de passe.
+	http.HandleFunc("/auth/forgot_password", accounts.handleForgotPassword)
+	http.HandleFunc("/auth/reset_password", accounts.handleResetPassword)
+	http.HandleFunc("/auth/resend_verification", withSession(accounts, accounts.handleResendVerification))
+	http.HandleFunc("/verify", accounts.handleVerify)
+	http.HandleFunc("/forgot", forgotPage)
+	http.HandleFunc("/reset", resetPage)
+
 	http.HandleFunc("/auth/signup", accounts.handleSignup)
 	http.HandleFunc("/auth/login", accounts.handleLogin)
 	http.HandleFunc("/auth/me", accounts.handleMe)
@@ -343,7 +355,7 @@ func main() {
 			v1JobsList(orgs, chunker, billing).ServeHTTP(w, r)
 			return
 		}
-		v1Submit(orgs, assets, chunker, billing).ServeHTTP(w, r)
+		v1Submit(orgs, assets, chunker, billing, accounts).ServeHTTP(w, r)
 	})
 	http.HandleFunc("/v1/jobs/", func(w http.ResponseWriter, r *http.Request) {
 		switch {

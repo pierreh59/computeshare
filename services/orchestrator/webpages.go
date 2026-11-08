@@ -295,6 +295,7 @@ const loginHTML = `<!DOCTYPE html>
  <label>Mot de passe</label><input id="password" type="password">
  <button onclick="doLogin()">Se connecter</button>
  <div id="msg"></div>
+ <p class="muted" style="margin-top:14px"><a href="/forgot">Mot de passe oublie ?</a></p>
 </div>
 
 <script>
@@ -316,6 +317,87 @@ function doLogin(){
 func signupPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(signupHTML))
+}
+
+// Sprint 29 : page "mot de passe oublie".
+const forgotHTML = `<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ComputeShare - Mot de passe oublie</title>` + accountsCSS + accountsJS + `</head>
+<body>
+<div class="wrap">
+<h1>🥗 ComputeShare - Mot de passe oublie</h1>
+<p class="muted"><a href="/login">Retour a la connexion</a></p>
+
+<div class="card">
+ <p>Indiquez votre adresse e-mail : nous vous enverrons un lien pour choisir un nouveau mot de passe (valable 1 heure).</p>
+ <label>Adresse e-mail</label><input id="email" type="email">
+ <button onclick="doForgot()">Envoyer le lien</button>
+ <div id="msg"></div>
+</div>
+
+<script>
+function doForgot(){
+ var email=document.getElementById('email').value.trim();
+ if(!email){document.getElementById('msg').innerHTML='<p class="err">Entrez votre adresse e-mail.</p>';return;}
+ document.getElementById('msg').textContent='Envoi en cours...';
+ fetch('/auth/forgot_password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email})})
+ .then(function(r){
+  if(!r.ok){return r.text().then(function(t){throw new Error(t||('HTTP '+r.status));});}
+  document.getElementById('msg').innerHTML='<p class="ok">Si un compte existe pour cette adresse, un e-mail de reinitialisation vient d etre envoye (verifiez aussi votre dossier spam).</p>';
+ })
+ .catch(function(e){document.getElementById('msg').innerHTML='<p class="err">Erreur : '+esc(e.message)+'</p>';});
+}
+</script>
+</div>
+</body>
+</html>`
+
+// Sprint 29 : page de choix du nouveau mot de passe (lien e-mail).
+const resetHTML = `<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ComputeShare - Nouveau mot de passe</title>` + accountsCSS + accountsJS + `</head>
+<body>
+<div class="wrap">
+<h1>🥗 ComputeShare - Nouveau mot de passe</h1>
+<p class="muted"><a href="/login">Retour a la connexion</a></p>
+
+<div class="card">
+ <p>Choisissez votre nouveau mot de passe (8 caracteres minimum). Toutes vos sessions ouvertes seront deconnectees.</p>
+ <label>Nouveau mot de passe</label><input id="p1" type="password">
+ <label>Confirmez le mot de passe</label><input id="p2" type="password">
+ <button onclick="doReset()">Modifier mon mot de passe</button>
+ <div id="msg"></div>
+</div>
+
+<script>
+var tok=new URLSearchParams(location.search).get('token')||'';
+if(!tok){document.getElementById('msg').innerHTML='<p class="err">Lien invalide : utilisez le lien recu par e-mail.</p>';}
+function doReset(){
+ var p1=document.getElementById('p1').value,p2=document.getElementById('p2').value;
+ if(!tok){document.getElementById('msg').innerHTML='<p class="err">Lien invalide : utilisez le lien recu par e-mail.</p>';return;}
+ if(p1!==p2){document.getElementById('msg').innerHTML='<p class="err">Les deux mots de passe ne correspondent pas.</p>';return;}
+ if(p1.length<8){document.getElementById('msg').innerHTML='<p class="err">Mot de passe : 8 caracteres minimum.</p>';return;}
+ document.getElementById('msg').textContent='Verification...';
+ fetch('/auth/reset_password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:tok,new_password:p1})})
+ .then(function(r){
+  if(!r.ok){return r.text().then(function(t){var j;try{j=JSON.parse(t);}catch(e){j=null;}throw new Error((j&&j.error)||t||('HTTP '+r.status));});}
+  document.getElementById('msg').innerHTML='<p class="ok">Mot de passe modifie.</p><p><a href="/login">Se connecter</a></p>';
+ })
+ .catch(function(e){document.getElementById('msg').innerHTML='<p class="err">Erreur : '+esc(e.message)+'</p>';});
+}
+</script>
+</div>
+</body>
+</html>`
+
+func forgotPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(forgotHTML))
+}
+
+func resetPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(resetHTML))
 }
 
 func loginPage(w http.ResponseWriter, r *http.Request) {
@@ -341,6 +423,13 @@ const meHTML = `<!DOCTYPE html>
  <div class="tile"><div class="tile-label">Crédits disponibles</div><div class="tile-value money" id="bal">…</div></div>
  <div class="tile"><div class="tile-label">Dépensé HT (total)</div><div class="tile-value" id="spent">…</div></div>
  <div class="tile"><div class="tile-label">Économie vs AWS</div><div class="tile-value" style="color:var(--cyan)" id="sav">…</div></div>
+</div>
+
+<div id="verifyBanner" class="card" style="display:none;border-color:#f59e0b">
+ <h2>Verification de votre adresse e-mail requise</h2>
+ <p class="muted">Pour soumettre des jobs, cliquez sur le lien envoye a <b id="verifyEmail"></b> (valable 1 heure). Pensez a verifier votre dossier spam.</p>
+ <button class="gray" onclick="resendVerify()">Renvoyer l e-mail de verification</button>
+ <span id="verifyMsg" style="margin-left:10px"></span>
 </div>
 
 <div class="card">
@@ -399,6 +488,17 @@ renderAccountCard();
 var mesAssets=[];
 renderAssets();
 refreshBalance();refreshUsage();
+var meUser=user();
+if(meUser && !meUser.email_verified){
+ document.getElementById('verifyBanner').style.display='';
+ document.getElementById('verifyEmail').textContent=meUser.email;
+}
+function resendVerify(){
+ document.getElementById('verifyMsg').textContent='Envoi en cours...';
+ api('/auth/resend_verification',{method:'POST'}).then(function(){
+  document.getElementById('verifyMsg').textContent='E-mail envoye (valable 1 heure).';
+ }).catch(function(e){document.getElementById('verifyMsg').textContent='Erreur : '+esc(e.message);});
+}
 function refreshBalance(){
  api('/v1/balance').then(function(b){
   document.getElementById('bal').textContent=b.balance_eur.toFixed(2)+' €';
@@ -554,6 +654,13 @@ const sellerHTML = `<!DOCTYPE html>
 <h1>🥗 Mon espace fournisseur</h1>
 <p class="muted"><span id="who"></span> — <a href="#" onclick="logout();return false;">Se déconnecter</a></p>
 
+<div id="verifyBanner" class="card" style="display:none;border-color:#f59e0b">
+ <h2>Verifiez votre adresse e-mail</h2>
+ <p class="muted">Un lien de verification a ete envoye a <b id="verifyEmail"></b> (valable 1 heure). Un compte non verifie est limite.</p>
+ <button class="gray" onclick="resendVerify()">Renvoyer l e-mail de verification</button>
+ <span id="verifyMsg" style="margin-left:10px"></span>
+</div>
+
 <div class="card">
  <h2>Mes gains</h2>
  <div id="wal">Actualisation...</div>
@@ -583,6 +690,17 @@ if(!requireRole('seller'))throw new Error('redirection');
 document.getElementById('who').textContent=user().email;
 renderAccountCard();
 refreshNodes();refreshWallet();showToken();
+var meUser=user();
+if(meUser && !meUser.email_verified){
+ document.getElementById('verifyBanner').style.display='';
+ document.getElementById('verifyEmail').textContent=meUser.email;
+}
+function resendVerify(){
+ document.getElementById('verifyMsg').textContent='Envoi en cours...';
+ api('/auth/resend_verification',{method:'POST'}).then(function(){
+  document.getElementById('verifyMsg').textContent='E-mail envoye (valable 1 heure).';
+ }).catch(function(e){document.getElementById('verifyMsg').textContent='Erreur : '+esc(e.message);});
+}
 function refreshWallet(){
  api('/seller/wallet').then(function(w){
   var h='<p>Total des gains : <b>'+w.total_balance.toFixed(6)+' EUR</b></p>';
