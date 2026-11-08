@@ -392,6 +392,11 @@ const meHTML = `<!DOCTYPE html>
 if(!requireRole('client'))throw new Error('redirection');
 document.getElementById('who').textContent=user().email;
 renderAccountCard();
+// Sprint 27b : la liste des assets DOIT exister avant le premier
+// renderAssets() (lecon vue en vrai : initialisee apres, le script
+// s'interrompait et mesAssets restait indefinie -> "Cannot read
+// properties of undefined (reading 'push')" au televersement).
+var mesAssets=[];
 renderAssets();
 refreshBalance();refreshUsage();
 function refreshBalance(){
@@ -423,7 +428,6 @@ function rtChange(){
 // Sprint 27b : upload d'assets d'entree depuis la console (avant
 // l'API, c'etait reserve a curl). Le fichier est envoye brut dans le
 // corps de la requete, le nom passe en parametre d'URL.
-var mesAssets=[];
 function uploadAsset(){
  var f=document.getElementById('assetfile').files[0];
  if(!f){document.getElementById('assetmsg').innerHTML='<p class="err">Choisissez d\'abord un fichier.</p>';return;}
@@ -458,11 +462,25 @@ function renderAssets(){
  document.getElementById('assetlist').innerHTML=h;
 }
 function removeAsset(i){mesAssets.splice(i,1);renderAssets();}
+// Sprint 27b2 : decoupe des arguments qui respecte les guillemets
+// doubles - sans elle, la commande sh -c "cat entree.txt > sortie.txt"
+// etait coupee en 5 morceaux et le conteneur echouait.
+function splitArgs(s){
+ var out=[],cur='',q=false;
+ for(var i=0;i<s.length;i++){
+  var c=s.charAt(i);
+  if(c==='"'){q=!q;continue;}
+  if(c===' '&&!q){if(cur){out.push(cur);cur='';}continue;}
+  cur+=c;
+ }
+ if(cur)out.push(cur);
+ return out;
+}
 function submitJob(){
  var id=document.getElementById('jid').value.trim();
  if(!id){document.getElementById('msg').innerHTML='<p class="err">Choisissez un ID de job.</p>';return;}
  var body={id:id,command:document.getElementById('cmd').value.trim(),
-  args:document.getElementById('args').value.split(' ').filter(Boolean),
+  args:splitArgs(document.getElementById('args').value),
   task_count:parseInt(document.getElementById('count').value)||1,
   timeout_secs:parseInt(document.getElementById('tmo').value)||600,
   output_name:document.getElementById('outname').value.trim()};
