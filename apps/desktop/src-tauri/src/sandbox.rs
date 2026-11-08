@@ -35,6 +35,13 @@ pub struct ChunkResult {
     pub outcome: String, // ok | timeout | failed | bad_output | rejected
     pub detail: String,
     pub duration_ms: u128,
+    /// Sprint 30 : temps de telechargement de l'image Docker
+    /// (0 pour les jobs sandbox classiques). Facture au client a
+    /// tarif reduit, jamais paye au vendeur.
+    pub pull_ms: u64,
+    /// Sprint 30 : temps de CALCUL reel (execution). Le vendeur
+    /// n'est paye que sur cette duree.
+    pub compute_ms: u64,
     pub output_sha256: Option<String>,
     /// Sprint 26 : chemin du fichier de resultat sur le noeud, a
     /// rapatrier vers le serveur apres le rapport (None si echec).
@@ -69,13 +76,20 @@ fn is_allowed(command: &str) -> bool {
 /// Prepare et execute un chunk dans son repertoire sandbox dedie.
 pub fn run_chunk(spec: ChunkSpec) -> ChunkResult {
     let started = Instant::now();
-    let mk = |outcome: &str, detail: &str, sha: Option<String>, path: Option<String>| ChunkResult {
-        chunk_id: spec.chunk_id.clone(),
-        outcome: outcome.to_string(),
-        detail: detail.to_string(),
-        duration_ms: started.elapsed().as_millis(),
-        output_sha256: sha,
-        output_path: path,
+    let mk = |outcome: &str, detail: &str, sha: Option<String>, path: Option<String>| {
+        let total = started.elapsed().as_millis();
+        ChunkResult {
+            chunk_id: spec.chunk_id.clone(),
+            outcome: outcome.to_string(),
+            detail: detail.to_string(),
+            duration_ms: total,
+            // Sprint 30 : un job sandbox n'a pas d'image a
+            // telecharger : tout le temps est du calcul.
+            pull_ms: 0,
+            compute_ms: total as u64,
+            output_sha256: sha,
+            output_path: path,
+        }
     };
 
     if !is_allowed(&spec.command) {

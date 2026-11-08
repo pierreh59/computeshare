@@ -199,6 +199,11 @@ fn run_and_report(gateway: &str, node_id: &str, chunk: &serde_json::Value) {
         "outcome": res.outcome,
         "sha256": res.output_sha256.unwrap_or_default(),
         "duration_secs": (res.duration_ms / 1000) as u64,
+        // Sprint 30 : decomposition du temps (ms) pour la facturation :
+        // pull facture au client a tarif reduit, calcul paye au
+        // vendeur et facture a plein tarif.
+        "pull_ms": res.pull_ms,
+        "compute_ms": res.compute_ms,
         // Sprint 26b : detail d erreur transmis au serveur (diagnostic).
         "detail": res.detail,
     })
@@ -390,6 +395,8 @@ fn run_chunk_gateway(
             outcome: "rejected".into(),
             detail: "chunk sans identifiant".into(),
             duration_ms: 0,
+            pull_ms: 0,
+            compute_ms: 0,
             output_sha256: None,
             output_path: None,
         };
@@ -414,6 +421,8 @@ fn run_chunk_gateway(
                     outcome: "failed".into(),
                     detail: format!("assets d'entree : {e}"),
                     duration_ms: 0,
+                    pull_ms: 0,
+                    compute_ms: 0,
                     output_sha256: None,
                     output_path: None,
                 };

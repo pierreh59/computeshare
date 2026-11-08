@@ -141,12 +141,18 @@ pub(crate) fn run_container_chunk(
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let started = Instant::now();
+    // Sprint 30 : decomposition du temps rapporte au serveur -
+    // pull (telechargement de l'image) vs calcul reel (docker run).
+    let pull_ms = std::cell::Cell::new(0u64);
+    let compute_ms = std::cell::Cell::new(0u64);
 
     let mk = |outcome: &str, detail: &str, sha: Option<String>, path: Option<String>| ChunkResult {
         chunk_id: spec.chunk_id.clone(),
         outcome: outcome.to_string(),
         detail: detail.to_string(),
         duration_ms: started.elapsed().as_millis(),
+        pull_ms: pull_ms.get(),
+        compute_ms: compute_ms.get(),
         output_sha256: sha,
         output_path: path,
     };
@@ -208,6 +214,43 @@ pub(crate) fn run_container_chunk(
                 None,
                 None,
             );
+        }
+    }
+
+    // Sprint 30 : pull SEPARAE du run pour mesurer le temps de
+    // telechargement de l'image. Ce temps est facture au client a
+    // tarif reduit (20 %) et n'est jamais paye au vendeur. Si
+    // l'image est deja en cache local, le pull est quasi instantane.
+    let pull_started = Instant::now();
+    let pull_out = Command::new("docker")
+        .args(["pull", image])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output();
+    pull_ms.set(pull_started.elapsed().as_millis() as u64);
+    match pull_out {
+        Ok(o) if o.status.success() => {
+            crate::node::trace(&format!(
+                "{} image telechargee en {} ms",
+                spec.chunk_id,
+                pull_ms.get()
+            ));
+        }
+        Ok(o) => {
+            return mk(
+                "failed",
+                &format!(
+                    "pull de l'image impossible | {}",
+                    tail_utf8(&o.stderr)
+                ),
+                None,
+                None,
+            );
+        }
+        Err(e) => {
+            return mk("failed", &format!("lancement de docker pull : {e}"), None, None);
         }
     }
 
@@ -306,6 +349,10 @@ pub(crate) fn run_container_chunk(
 
     builder.creation_flags(CREATE_NO_WINDOW);
 
+    // Sprint 30 : le temps de calcul mesure l'execution du conteneur
+    // (docker run), hors telechargement de l'image.
+    let compute_started = Instant::now();
+
     let mut child = match builder
         .current_dir(&dir)
         .stdin(Stdio::null())
@@ -337,6 +384,7 @@ pub(crate) fn run_container_chunk(
         Ok(o) => o,
         Err(e) => return mk("failed", &format!("wait: {e}"), None, None),
     };
+    compute_ms.set(compute_started.elapsed().as_millis() as u64);
 
     if started.elapsed() >= timeout {
         return mk("timeout", "delai depasse, conteneur interrompu", None, None);
@@ -372,6 +420,8 @@ pub(crate) fn run_container_chunk(
         outcome: "rejected".into(),
         detail: "conteneurs supportes uniquement sous Windows avec WSL2".into(),
         duration_ms: 0,
+        pull_ms: 0,
+        compute_ms: 0,
         output_sha256: None,
         output_path: None,
     }

@@ -198,8 +198,9 @@ func (s *Store) SaveChunk(ch *Chunk) {
 	_, err := s.db.Exec(`INSERT INTO runtime_chunks
 		(id, job_id, node_id, command, args, expected_output, timeout_secs,
 		 status, result_sha256, price_eur_per_hour, payout_eur,
-		 attempts, zone, assets, duration_secs, sampled, org_id, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17, now())
+		 attempts, zone, assets, duration_secs, sampled, org_id,
+		 pull_ms, compute_ms, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19, now())
 		ON CONFLICT (id) DO UPDATE SET
 		  status=EXCLUDED.status,
 		  result_sha256=EXCLUDED.result_sha256,
@@ -208,13 +209,16 @@ func (s *Store) SaveChunk(ch *Chunk) {
 		  attempts=EXCLUDED.attempts,
 		  node_id=EXCLUDED.node_id,
 		  duration_secs=EXCLUDED.duration_secs,
+		  pull_ms=EXCLUDED.pull_ms,
+		  compute_ms=EXCLUDED.compute_ms,
 		  sampled=EXCLUDED.sampled,
 		  updated_at=now()`,
 		ch.ID, ch.JobID, ch.NodeID, ch.Command, string(args), ch.ExpectedOutput,
 		ch.TimeoutSecs, ch.Status, nullStr(ch.ResultSHA256),
 		ch.PriceEurPerHour, ch.PayoutEur,
 		ch.Attempts, nullStr(ch.Zone), string(assets),
-		ch.DurationSecs, ch.Sampled, ch.OrgID)
+		ch.DurationSecs, ch.Sampled, ch.OrgID,
+		ch.PullMS, ch.ComputeMS)
 	if err != nil {
 		log.Printf("store.SaveChunk: %v", err)
 	}

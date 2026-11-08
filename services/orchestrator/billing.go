@@ -29,6 +29,11 @@ const (
 	// TVA appliquee aux clients francais (OSS : entreprises UE en
 	// autoliquidation, releve du perimetre juridique avant la beta).
 	billingVAT = 0.20
+	// Sprint 30 : taux de facturation du temps de pull (telechargement
+	// de l'image chez le fournisseur). Le client paie ce temps a 20 %
+	// du tarif ; le vendeur n'est pas paye pour le pull (sa machine
+	// prepare le travail sans consommer de ressource de calcul).
+	billingPullRate = 0.20
 	// Seuil d'alerte de credits faibles (EUR).
 	lowCreditThreshold = 5.0
 	// Prix de comparaison AWS (GPU on-demand equivalent, EUR/h GPU).
@@ -115,13 +120,20 @@ func (b *Billing) HasCredits(orgID string) bool {
 	return b.Balance(orgID) > 0.01
 }
 
-// ChargeChunk facture un chunk termine a la GPU-heure reelle.
-// Appele par Chunker.Complete (mutex chunker deja pris).
-func (b *Billing) ChargeChunk(orgID string, payoutEur float64, gpuHours float64, chunkID string) {
-	if orgID == "" || payoutEur <= 0 {
+// ChargeChunk facture un chunk termine : temps de CALCUL a plein
+// tarif + temps de pull a taux reduit (Sprint 30). Le GPU-heure
+// journalise est le temps de calcul reel (le pull n'est pas du
+// calcul). Appele par Chunker.Complete (mutex chunker deja pris).
+// Sprint 30 : un chunk de calcul tres court mais avec un pull long
+// reste facture (le cout vient aussi du pull).
+func (b *Billing) ChargeChunk(orgID string, payoutEur, pullPayoutEur, gpuHours float64, chunkID string) {
+	if orgID == "" {
 		return
 	}
-	cost := payoutEur * billingMargin
+	cost := (payoutEur + pullPayoutEur*billingPullRate) * billingMargin
+	if cost <= 0 {
+		return
+	}
 	vat := cost * billingVAT
 
 	b.mu.Lock()

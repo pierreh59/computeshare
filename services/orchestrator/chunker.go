@@ -81,6 +81,16 @@ type Chunk struct {
 	// LAI-43/44 : duree reelle declaree et flag d'echantillonnage.
 	DurationSecs uint64 `json:"duration_secs,omitempty"`
 	Sampled      bool   `json:"sampled,omitempty"`
+	// Sprint 30 : decomposition du temps rapporte par le noeud -
+	// pull (telechargement de l'image Docker) vs calcul reel.
+	PullMS    uint64 `json:"-"`
+	ComputeMS uint64 `json:"-"`
+	// Sprint 30 : valeur "tarif vendeur" du temps de pull, servant
+	// uniquement a facturer le client a taux reduit (20 %).
+	PullPayoutEur float64 `json:"-"`
+	// Sprint 30 : heures (memoire) pour le journal admin.
+	PullHours    float64 `json:"-"`
+	ComputeHours float64 `json:"-"`
 }
 
 // Chunker : ordre de creation conserve pour une distribution stable.
@@ -225,7 +235,11 @@ func (c *Chunker) NextFor(nodeID string) *Chunk {
 // rapport, pas de double paiement) et le paiement va au noeud qui
 // RAPPORTE (nodeID), pas au noeud theoretiquement assigne (en cas de
 // re-attribution pendant l'execution, l'ancien noeud doit etre paye).
-func (c *Chunker) Complete(chunkID, nodeID, outcome, sha, detail string, durationSecs uint64) bool {
+// Sprint 30 : le noeud decompose son temps en pull_ms (telechargement
+// de l'image, jamais paye au vendeur, facture au client a 20 %) et
+// compute_ms (calcul reel, paye et facture a plein tarif). Un rapport
+// sans compute_ms (ancien desktop) facture tout le temps rapporte.
+func (c *Chunker) Complete(chunkID, nodeID, outcome, sha, detail string, durationSecs, pullMS, computeMS uint64) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, ch := range c.chunks {
@@ -239,11 +253,25 @@ func (c *Chunker) Complete(chunkID, nodeID, outcome, sha, detail string, duratio
 				nodeID = ch.NodeID
 			}
 			ch.DurationSecs = durationSecs
+			ch.PullMS = pullMS
+			ch.ComputeMS = computeMS
 			if outcome == "ok" {
 				ch.Status = "done"
 				ch.ResultSHA256 = sha
-				hours := float64(durationSecs) / 3600.0
-				ch.PayoutEur = ch.PriceEurPerHour * hours
+				// Sprint 30 : heures facturables - calcul reel a
+				// plein tarif, pull a taux reduit cote client.
+				computeHours := float64(durationSecs) / 3600.0
+				if computeMS > 0 {
+					computeHours = float64(computeMS) / 3_600_000.0
+				}
+				pullHours := float64(pullMS) / 3_600_000.0
+				// Le vendeur n'est paye QUE sur le temps de calcul.
+				ch.PayoutEur = ch.PriceEurPerHour * computeHours
+				// Valeur "tarif vendeur" du pull : le client la paie
+				// a 20 % (marge plateforme pendant la preparation).
+				ch.PullPayoutEur = ch.PriceEurPerHour * pullHours
+				ch.PullHours = pullHours
+				ch.ComputeHours = computeHours
 			} else {
 				ch.Status = "failed"
 			}
@@ -251,8 +279,8 @@ func (c *Chunker) Complete(chunkID, nodeID, outcome, sha, detail string, duratio
 			ch.NodeID = nodeID
 			// Sprint 17 : journal temps reel du dashboard admin.
 			if outcome == "ok" {
-				dashLog("chunk_done", fmt.Sprintf("%s termine par %s (%.0f s, verse %.6f EUR)",
-					ch.ID, ch.NodeID, float64(durationSecs), ch.PayoutEur))
+				dashLog("chunk_done", fmt.Sprintf("%s termine par %s (calcul %.0f s, pull %.0f s, verse %.6f EUR)",
+					ch.ID, ch.NodeID, ch.ComputeHours*3600, ch.PullHours*3600, ch.PayoutEur))
 			} else {
 				// Sprint 26b : le detail du noeud complete le
 				// verdict (motif Docker, fichier manquant, etc.).
@@ -272,9 +300,11 @@ func (c *Chunker) Complete(chunkID, nodeID, outcome, sha, detail string, duratio
 			}
 			// LAI-32 : le client B2B est facture a la GPU-heure
 			// reelle (cout = reversement x marge, TVA journalisee).
+			// Sprint 30 : le pull est facture a taux reduit ; les
+			// GPU-heures journalisees = temps de CALCUL seul.
 			if outcome == "ok" {
-				c.billing.ChargeChunk(ch.OrgID, ch.PayoutEur,
-					float64(durationSecs)/3600.0, ch.ID)
+				c.billing.ChargeChunk(ch.OrgID, ch.PayoutEur, ch.PullPayoutEur,
+					ch.ComputeHours, ch.ID)
 			}
 			c.store.SaveChunk(ch)
 			return true
@@ -524,6 +554,9 @@ func nextChunk(c *Chunker) http.HandlerFunc {
 // POST /chunk_result : le noeud signale {chunk_id, outcome, sha256,
 // duration_secs, node_id} (node_id depuis le sprint 22 : le paiement
 // va au noeud qui rapporte, pas a l'assigne theorique).
+// Sprint 30 : pull_ms / compute_ms en plus (decomposition du temps
+// pour la facturation ; absents = ancien desktop, tout le temps
+// rapporte est facture comme du calcul).
 func completeChunk(c *Chunker) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var res struct {
@@ -534,6 +567,8 @@ func completeChunk(c *Chunker) http.HandlerFunc {
 			// Sprint 26b : detail d'erreur optionnel (tronque).
 			Detail       string `json:"detail"`
 			DurationSecs uint64 `json:"duration_secs"`
+			PullMS       uint64 `json:"pull_ms"`
+			ComputeMS    uint64 `json:"compute_ms"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&res); err != nil {
 			http.Error(w, "invalid result", http.StatusBadRequest)
@@ -542,7 +577,7 @@ func completeChunk(c *Chunker) http.HandlerFunc {
 		if len(res.Detail) > 500 {
 			res.Detail = res.Detail[:500]
 		}
-		ok := c.Complete(res.ChunkID, res.NodeID, res.Outcome, res.SHA256, res.Detail, res.DurationSecs)
+		ok := c.Complete(res.ChunkID, res.NodeID, res.Outcome, res.SHA256, res.Detail, res.DurationSecs, res.PullMS, res.ComputeMS)
 		writeJSON(w, map[string]bool{"recorded": ok})
 	}
 }
