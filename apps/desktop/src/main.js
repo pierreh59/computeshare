@@ -162,7 +162,7 @@
       const msg = document.querySelector("#upmsg");
       msg.textContent = "Vérification...";
       try {
-        const u = await inv("plugin:updater|check");
+        const u = await inv("plugin:updater|check", { timeout: 15000 });
         if (u && u.rid !== undefined) {
           // Proposition inline : boutons dans la fenetre, pas de
           // confirm() natif (titre "tauri.localhost indique").
@@ -201,7 +201,7 @@
                   msg.textContent = "Installation... l'application va redémarrer.";
                 }
               };
-              await inv("plugin:updater|download_and_install", { rid: u.rid, onEvent: chan });
+              await inv("plugin:updater|download_and_install", { rid: u.rid, onEvent: chan, timeout: 300000 });
               await inv("plugin:process|relaunch");
             } catch (err) {
               msg.innerHTML = '<span style="color:#f87171">' + esc(String(err)) + "</span>";
@@ -211,7 +211,11 @@
           msg.textContent = "Application à jour.";
         }
       } catch (e) {
-        msg.innerHTML = '<span style="color:#f87171">' + esc(String(e)) + "</span>";
+        // Sprint 28b : message clair au lieu d'un "Vérification..." eternel
+        // (la verification n'a plus de timeout infini, mais on guide l'utilisateur).
+        msg.innerHTML = '<span style="color:#f87171">Échec de la vérification : ' +
+          esc(String(e)) +
+          ' (si cela persiste, téléchargez la mise à jour manuellement sur github.com/pierreh59/computeshare/releases)</span>';
       }
     };
 
