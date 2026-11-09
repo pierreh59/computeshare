@@ -444,6 +444,13 @@ pub(crate) fn run_container_chunk(
     // NB : le drapeau doit preceder le nom de l'image.
     if gpu {
         builder.args(["--gpus", "all"]);
+        // Sprint 33 : sans cette variable, le runtime NVIDIA n'expose
+        // que compute+utility. Les outils bases sur Vulkan (ex. les
+        // modeles d'IA image comme Real-ESRGAN) ne voient alors PAS le
+        // GPU et retombent sur du rendu logiciel CPU (vu en vrai : job
+        // demo-upscale-ia-gpu-3, CPU sature, GPU a 3 %, timeout apres
+        // 20 min). "all" expose aussi la couche graphique/Vulkan.
+        builder.env("NVIDIA_DRIVER_CAPABILITIES", "all");
     }
     builder
         .arg(image)
