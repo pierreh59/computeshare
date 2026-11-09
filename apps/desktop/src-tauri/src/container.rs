@@ -212,6 +212,47 @@ fn parse_taille(s: &str) -> Option<f64> {
     t.parse::<f64>().ok()
 }
 
+/// Sprint 33c : le pilote WSL complet (avec la couche Vulkan) est-il
+/// montable depuis la VM Docker ? Docker Desktop n'injecte que CUDA ;
+/// sans ce montage les outils Vulkan ne voient pas le GPU. Sonde
+/// memorisee 5 min (meme pattern que gpu_ready, sprint 33).
+#[cfg(windows)]
+fn vulkan_wsl_pret() -> bool {
+    use std::os::windows::process::CommandExt;
+    use std::sync::Mutex;
+    static ETAT: std::sync::OnceLock<Mutex<Option<(std::time::Instant, bool)>>> =
+        std::sync::OnceLock::new();
+    let cell = ETAT.get_or_init(|| Mutex::new(None));
+    if let Some((sonde_a, pret)) = *cell.lock().unwrap() {
+        if sonde_a.elapsed().as_secs() < 300 {
+            return pret;
+        }
+    }
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let pret = Command::new("docker")
+        .args([
+            "run",
+            "--rm",
+            "-v",
+            "/usr/lib/wsl/lib:/usr/lib/wsl/lib:ro",
+            "alpine",
+            "test",
+            "-f",
+            "/usr/lib/wsl/lib/libGLX_nvidia.so.0",
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    *cell.lock().unwrap() = Some((std::time::Instant::now(), pret));
+    pret
+}
+
+#[cfg(not(windows))]
+fn vulkan_wsl_pret() -> bool {
+    false
+}
+
 /// Sprint 19 : execution conteneur. Windows uniquement, via docker.exe
 /// (Docker Desktop). Le dossier sandbox Windows est monte directement
 /// sur /work (Docker Desktop accepte les chemins Windows en /).
@@ -444,13 +485,34 @@ pub(crate) fn run_container_chunk(
     // NB : le drapeau doit preceder le nom de l'image.
     if gpu {
         builder.args(["--gpus", "all"]);
-        // Sprint 33 : sans cette variable, le runtime NVIDIA n'expose
-        // que compute+utility. Les outils bases sur Vulkan (ex. les
-        // modeles d'IA image comme Real-ESRGAN) ne voient alors PAS le
-        // GPU et retombent sur du rendu logiciel CPU (vu en vrai : job
-        // demo-upscale-ia-gpu-3, CPU sature, GPU a 3 %, timeout apres
-        // 20 min). "all" expose aussi la couche graphique/Vulkan.
-        builder.env("NVIDIA_DRIVER_CAPABILITIES", "all");
+        // Sprint 33c : Docker Desktop (WSL2) n'injecte QUE les
+        // bibliotheques CUDA dans le conteneur et force de son cote
+        // NVIDIA_DRIVER_CAPABILITIES=compute,utility (constate en
+        // vrai via les jobs demo-s33-diag-vulkan : la variable posee
+        // par le sprint 33 etait ecrasee). Les outils bases sur
+        // Vulkan (ncnn : Real-ESRGAN, waifu2x...) ne voient donc PAS
+        // le GPU et calculent sur le CPU (jobs demo-upscale-ia-gpu-3
+        // et -4 : CPU sature, GPU a 3 %, delai depasse). Correctif :
+        // monter le pilote WSL complet (libGLX_nvidia.so.0, present
+        // dans la VM Docker) + un descripteur Vulkan (ICD) qui
+        // pointe dessus. Sonde prealable : si le montage echoue
+        // (docker sans WSL), on execute SANS et les jobs CUDA
+        // restent fonctionnels.
+        if vulkan_wsl_pret() {
+            let icd = "{\"file_format_version\":\"1.0.2\",\"ICD\":{\"library_path\":\"/usr/lib/wsl/lib/libGLX_nvidia.so.0\",\"api_version\":\"1.3.239\"}}";
+            let fic = std::env::temp_dir().join("computeshare-nvidia-vulkan-icd.json");
+            if std::fs::write(&fic, icd).is_ok() {
+                let chemin_win = fic.to_string_lossy().replace('\\', "/");
+                builder.args([
+                    "-v",
+                    "/usr/lib/wsl/lib:/usr/lib/wsl/lib:ro",
+                    "-v",
+                    &format!("{chemin_win}:/etc/vulkan/icd.d/nvidia_icd.json:ro"),
+                ]);
+                builder.env("VK_ICD_FILENAMES", "/etc/vulkan/icd.d/nvidia_icd.json");
+                builder.env("LD_LIBRARY_PATH", "/usr/lib/wsl/lib");
+            }
+        }
     }
     builder
         .arg(image)
