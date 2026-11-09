@@ -219,6 +219,7 @@ fn parse_taille(s: &str) -> Option<f64> {
 #[cfg(windows)]
 fn vulkan_wsl_pret() -> bool {
     use std::os::windows::process::CommandExt;
+    use std::process::Command;
     use std::sync::Mutex;
     static ETAT: std::sync::OnceLock<Mutex<Option<(std::time::Instant, bool)>>> =
         std::sync::OnceLock::new();
@@ -351,7 +352,7 @@ pub(crate) fn run_container_chunk(
     // Sprint 33 : la progression du pull est affichee en direct dans
     // l'app (parsing des lignes de progression de docker).
     let pull_started = Instant::now();
-    let mut pull_detail = String::new();
+    let pull_detail;
     let pull_ok = {
         let mut child = match Command::new("docker")
             .args(["pull", image])
@@ -533,7 +534,7 @@ pub(crate) fn run_container_chunk(
     // (docker run), hors telechargement de l'image.
     let compute_started = Instant::now();
 
-    let mut child = match builder
+    let child = match builder
         .current_dir(&dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
