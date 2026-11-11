@@ -12,7 +12,7 @@ import (
 
 // orchestratorVersion : version de l'orchestrateur, affichee sur le
 // dashboard admin et dans /healthz. A incrementer a chaque sprint.
-const orchestratorVersion = "v0.30.0"
+const orchestratorVersion = "v0.31.0"
 
 func main() {
 	port := os.Getenv("PORT")
@@ -111,6 +111,9 @@ func main() {
 	http.HandleFunc("/admin/dash/ban", adminDashBan(registry, chunker))
 	http.HandleFunc("/admin/dash/unban", adminDashUnban(registry))
 	http.HandleFunc("/admin/dash/cancel", adminDashCancel(chunker))
+	// Sprint 38 : recherche de compte (client/fournisseur) par e-mail,
+	// nom, id utilisateur, org-id ou node-id (dashboard admin).
+	http.HandleFunc("/admin/dash/usersearch", adminDashUserSearch(accounts, billing, chunker, registry, wallet))
 	// Sprint 14 : les endpoints noeuds sont proteges par le jeton
 	// d'enrolement (en-tete X-Node-Token, cf. nodeauth.go).
 	http.HandleFunc("/register", nodeAuth.withNodeToken(func(w http.ResponseWriter, r *http.Request, sellerID string) {

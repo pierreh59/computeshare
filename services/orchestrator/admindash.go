@@ -430,6 +430,105 @@ func adminDashCancel(c *Chunker) http.HandlerFunc {
 	}
 }
 
+// GET /admin/dash/usersearch?q= : recherche d un compte utilisateur
+// (Sprint 38) par identifiant, e-mail, nom affiche, org-id ou id de
+// noeud. Autocompletion du dashboard : max 8 resultats, chacun avec les
+// infos complementaires utiles a l admin (solde, jobs, noeuds, KYC).
+func adminDashUserSearch(accounts *AccountStore, billing *Billing, c *Chunker, reg *Registry, wallet *Wallet) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !requireAdmin(r) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+		if len(q) < 2 {
+			writeJSON(w, map[string]interface{}{"results": []map[string]interface{}{}})
+			return
+		}
+		out := []map[string]interface{}{}
+		accounts.mu.RLock()
+		for _, u := range accounts.users {
+			if u.DeletedAt != nil {
+				continue
+			}
+			// Le noeud appartient-il a ce fournisseur ? (recherche
+			// par node-id possible).
+			nodeHit := ""
+			if u.Role == "seller" {
+				for _, n := range reg.NodesOfUser(u.ID) {
+					if strings.Contains(strings.ToLower(n.ID), q) {
+						nodeHit = n.ID
+						break
+					}
+				}
+			}
+			match := strings.Contains(strings.ToLower(u.ID), q) ||
+				strings.Contains(strings.ToLower(u.Email), q) ||
+				strings.Contains(strings.ToLower(u.DisplayName), q) ||
+				(u.OrgID != "" && strings.Contains(strings.ToLower(u.OrgID), q)) ||
+				nodeHit != ""
+			if !match {
+				continue
+			}
+			row := map[string]interface{}{
+				"id":             u.ID,
+				"email":          u.Email,
+				"name":           u.DisplayName,
+				"role":           u.Role,
+				"email_verified": u.EmailVerified,
+				"account_type":   u.AccountType,
+				"created_at":     u.CreatedAt.Format("02/01/2006"),
+			}
+			if u.AccountType == "societe" {
+				row["company"] = u.CompanyName
+				row["siret"] = u.Siret
+				row["siret_verified"] = u.SiretVerified
+			}
+			if u.Role == "client" && u.OrgID != "" {
+				row["org_id"] = u.OrgID
+				row["balance_eur"] = billing.Balance(u.OrgID)
+				jobs := c.OrgJobs(u.OrgID, 5)
+				row["jobs_recent"] = len(jobs)
+				list := []map[string]interface{}{}
+				for _, j := range jobs {
+					st, _ := j["chunks"].(map[string]int)
+					list = append(list, map[string]interface{}{
+						"job_id": j["job_id"], "done": st["done"], "failed": st["failed"],
+					})
+				}
+				row["jobs"] = list
+			}
+			if u.Role == "seller" {
+				nodes := reg.NodesOfUser(u.ID)
+				total := 0.0
+				kyc := "aucun"
+				pending := 0
+				for _, n := range nodes {
+					total += wallet.Balance(n.ID)
+					if k := wallet.KYCStatus(n.ID); k != "none" && k != "" {
+						kyc = k
+					}
+					pending += len(wallet.Withdrawals(n.ID))
+				}
+				row["node_count"] = len(nodes)
+				row["gains_eur"] = total
+				row["kyc"] = kyc
+				row["withdrawals"] = pending
+				if nodeHit != "" {
+					row["node_hit"] = nodeHit
+				}
+			}
+			out = append(out, row)
+			if len(out) >= 8 {
+				break
+			}
+		}
+		accounts.mu.RUnlock()
+		dashLog("admin", "recherche utilisateur '"+q+"' : "+fmt.Sprint(len(out))+" resultat(s)")
+		writeJSON(w, map[string]interface{}{"results": out})
+	}
+}
+
 // ------------------------------------------------------------------
 // 5. Page HTML (Leaflet via CDN pour la carte)
 // ------------------------------------------------------------------
@@ -520,6 +619,15 @@ h2{font-size:16px;margin:0}
 </div>
 
 <div class="card">
+<h2>&#128269; Rechercher un compte (client ou fournisseur)</h2>
+<div class="row">
+<input id="usearch" placeholder="e-mail, nom, id utilisateur, org-id ou node-id..." size="42">
+<span class="muted">min. 2 caract&egrave;res</span>
+</div>
+<div id="usearchout" style="margin-top:10px"></div>
+</div>
+
+<div class="card">
 <h2>&#128202; Bilan d’activité</h2>
 <div class="row">
 <button id="report">Envoyer le bilan par e-mail</button>
@@ -549,6 +657,41 @@ function api(path, body){
   });
 }
 function fmt(t){return new Date(t).toLocaleTimeString('fr-FR');}
+var usearchTimer=null;
+var usearchInput=document.getElementById('usearch');
+function renderUserRow(u){
+  var h='<div class="ncard" style="margin-bottom:10px">';
+  h+='<h3>'+esc(u.name)+' <span class="badge '+(u.role==='client'?'on':'warn')+'">'+(u.role==='client'?'CLIENT':'FOURNISSEUR')+'</span>';
+  if(u.email_verified){h+=' <span class="badge on">e-mail vérifié</span>';}else{h+=' <span class="badge ban">e-mail NON vérifié</span>';}
+  h+=' <span class="badge">'+esc(u.account_type)+'</span></h3>';
+  h+='<div class="muted">e-mail : <b>'+esc(u.email)+'</b> &middot; id : '+esc(u.id)+' &middot; créé le '+esc(u.created_at)+'</div>';
+  if(u.company){h+='<div class="muted">Société : <b>'+esc(u.company)+'</b> &middot; SIRET '+esc(u.siret)+' '+(u.siret_verified?'<span class="badge on">vérifié</span>':'<span class="badge warn">non vérifié</span>')+'</div>';}
+  if(u.role==='client'){
+    h+='<div class="muted">Solde : <b style="color:#4ade80">'+Number(u.balance_eur||0).toFixed(2)+' EUR</b> &middot; org : '+esc(u.org_id)+' &middot; '+esc(u.jobs_recent||0)+' job(s) récent(s)</div>';
+    if(u.jobs&&u.jobs.length){h+='<div class="muted">';u.jobs.forEach(function(j){h+='&middot; '+esc(j.job_id)+' ('+j.done+' ok / '+j.failed+' ko) ';});h+='</div>';}
+    var org=esc(u.org_id||'');
+    h+='<div class="row"><button class="sec" data-org="'+org+'" onclick="pickOrgForTopup(this.getAttribute(\'data-org\'))">Utiliser ce compte pour recharger/rembourser</button></div>';
+  }
+  if(u.role==='seller'){
+    h+='<div class="muted">'+esc(u.node_count||0)+' machine(s) &middot; gains cumulés : <b style="color:#4ade80">'+Number(u.gains_eur||0).toFixed(4)+' EUR</b> &middot; KYC : '+esc(u.kyc||'aucun')+' &middot; '+esc(u.withdrawals||0)+' retrait(s)</div>';
+    if(u.node_hit){h+='<div class="muted">Correspondance machine : <b>'+esc(u.node_hit)+'</b></div>';}
+  }
+  h+='</div>';
+  return h;
+}
+function pickOrgForTopup(orgId){document.getElementById('orgid').value=orgId;document.getElementById('billmsg').textContent='org '+orgId+' pré-rempli dans le formulaire ci-dessous.';}
+function userSearch(){
+  var q=usearchInput.value.trim();
+  if(q.length<2){document.getElementById('usearchout').innerHTML='';return;}
+  api('/admin/dash/usersearch?q='+encodeURIComponent(q)).then(function(d){
+    var h='';
+    if(!d.results||!d.results.length){h='<span class="muted">Aucun compte trouvé pour "'+esc(q)+'".</span>';}
+    else{d.results.forEach(function(u){h+=renderUserRow(u);});}
+    document.getElementById('usearchout').innerHTML=h;
+  }).catch(function(e){document.getElementById('usearchout').innerHTML='<span class="muted">Erreur : '+esc(String(e.message||e))+'</span>';});
+}
+usearchInput.addEventListener('input',function(){clearTimeout(usearchTimer);usearchTimer=setTimeout(userSearch,300);});
+
 
 function renderStats(s){
   var h='';
