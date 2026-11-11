@@ -94,6 +94,111 @@ fn status_cell() -> &'static Mutex<NodeStatus> {
     })
 }
 
+/// Sprint 36 : verrou tolerant au poison. Si un fil panique en tenant
+/// le verrou, std::sync l'"empoisonne" et les autres fils (register,
+/// UI, poll) ne doivent pas mourir en cascade a leur tour a cause d'un
+/// lock().unwrap(). On recupere le contenu garde meme empoisonne : le
+/// NodeStatus est de simples champs, jamais structurellement incoherent.
+fn lock_status() -> std::sync::MutexGuard<'static, NodeStatus> {
+    status_cell().lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// Sprint 36 : la tache en cours, vue par le chien de garde externe.
+/// deadline = instant au-dela duquel la tache est consideree bloquee
+/// (recalculee phase par phase : assets, calcul, envoi).
+struct WorkInfo {
+    chunk_id: String,
+    deadline: std::time::Instant,
+}
+
+fn working_cell() -> &'static Mutex<Option<WorkInfo>> {
+    static CELL: OnceLock<Mutex<Option<WorkInfo>>> = OnceLock::new();
+    CELL.get_or_init(|| Mutex::new(None))
+}
+
+/// Sprint 36 : debut de tache, echeance initiale couvrant la phase
+/// d'assets puis celle de calcul.
+fn working_begin(chunk_id: &str, echeance_secs: u64) {
+    *working_cell().lock() = Some(WorkInfo {
+        chunk_id: chunk_id.to_string(),
+        deadline: std::time::Instant::now() + Duration::from_secs(echeance_secs),
+    });
+}
+
+/// Sprint 36 : nouvelle echeance (changement de phase).
+fn working_echeance(secs: u64) {
+    if let Some(w) = working_cell().lock().as_mut() {
+        w.deadline = std::time::Instant::now() + Duration::from_secs(secs);
+    }
+}
+
+/// Sprint 36 : fin de tache (normale OU apres panic interceptee).
+fn working_end() {
+    *working_cell().lock() = None;
+}
+
+/// Sprint 36 : message lisible d'une charge de panic recuperee par
+/// catch_unwind (String ou &str en pratique).
+fn panic_msg(p: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = p.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = p.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "cause inconnue".to_string()
+    }
+}
+
+/// Sprint 36 : chien de garde EXTERNE du fil de poll. Le fil ne peut
+/// pas etre tue de l'exterieur en Rust : si une tache depasse son
+/// echeance (le chien de garde INTERNE de container.rs aurait deja du
+/// la couper au timeout du chunk), on detruit le conteneur docker au
+/// mieux pour debloquer le fil bloque dans docker run, on journalise
+/// et on affiche l'erreur - plus jamais de noeud "en ligne mais qui
+/// ne traite rien" sans explication (symptome du 11 nov. 2026).
+fn watchdog_loop() {
+    loop {
+        std::thread::sleep(Duration::from_secs(30));
+        let bloquee: Option<String> = {
+            let w = working_cell().lock();
+            match w.as_ref() {
+                Some(info) if std::time::Instant::now() > info.deadline => {
+                    Some(info.chunk_id.clone())
+                }
+                _ => None,
+            }
+        };
+        let Some(chunk_id) = bloquee else { continue };
+        trace(&format!(
+            "{} WATCHDOG : tache bloquee au-dela de son delai, destruction du conteneur au mieux",
+            chunk_id
+        ));
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            use std::process::{Command, Stdio};
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            let cname = format!("cs-{}", crate::sandbox::sanitize_id(&chunk_id));
+            let _ = Command::new("docker")
+                .args(["rm", "-f", &cname])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW)
+                .status();
+        }
+        set_error(&format!(
+            "watchdog : la tache {} semblait bloquee, conteneur interrompu (le noeud continue)",
+            chunk_id
+        ));
+        // Re verifier dans 10 min si le fil reste bloque, sans toucher
+        // a l'etat working (le fil de poll en reste maitre).
+        let w = working_cell().lock();
+        if let Some(info) = w.as_mut() {
+            info.deadline = std::time::Instant::now() + Duration::from_secs(600);
+        }
+    }
+}
+
 /// Sprint 16 : plus AUCUN parametre - tout vient de la configuration
 /// persistante (gateway + node_id + jeton recupere a la connexion).
 #[tauri::command]
@@ -107,7 +212,7 @@ pub fn start_node() -> Result<(), String> {
         return Err("configuration incomplete".into());
     }
     crate::http::set_node_token(&cfg.node_token);
-    let mut st = status_cell().lock().unwrap();
+    let mut st = lock_status();
     if st.running {
         return Ok(()); // deja demarre, une seule boucle par noeud
     }
@@ -116,12 +221,15 @@ pub fn start_node() -> Result<(), String> {
     st.node_id = id.clone();
     drop(st);
     std::thread::spawn(move || node_loop(gw, id));
+    // Sprint 36 : un seul chien de garde par demarrage du noeud (le
+    // garde st.running empeche un double lancement).
+    std::thread::spawn(watchdog_loop);
     Ok(())
 }
 
 #[tauri::command]
 pub fn node_status() -> NodeStatus {
-    status_cell().lock().unwrap().clone()
+    lock_status().clone()
 }
 
 use std::time::Duration;
@@ -166,7 +274,7 @@ fn node_loop(gateway: String, node_id: String) {
                     // Un register reussi efface l'erreur precedente : sans
                     // cela, "gateway injoignable" restait affiche meme apres
                     // une reconnexion reussie.
-                    status_cell().lock().unwrap().last_error.clear();
+                    lock_status().last_error.clear();
                 }
                 Some(r) if r.status == 401 || r.status == 403 => set_error(
                     "jeton de noeud refuse : reconnectez-vous avec votre compte (bouton Se deconnecter puis connexion)",
@@ -187,7 +295,32 @@ fn node_loop(gateway: String, node_id: String) {
             if let Some(r) = crate::http::get(&gateway, &format!("/chunks?node_id={}", node_id)) {
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&r.body) {
                     if v.is_object() {
-                        run_and_report(&gateway, &node_id, &v);
+                        // Sprint 36 : une panic pendant le traitement d'un
+                        // chunk tuait AVANT le fil de poll en silence (app
+                        // Windows sans console = rien n'est affiche) : le
+                        // noeud restait "en ligne" (register independant)
+                        // mais ne traitait plus jamais rien (vu en vrai le
+                        // 11 nov. 2026). Le fil survit desormais a toute
+                        // panic, avec nettoyage complet de l'etat.
+                        let res = std::panic::catch_unwind(
+                            std::panic::AssertUnwindSafe(|| {
+                                run_and_report(&gateway, &node_id, &v)
+                            }),
+                        );
+                        if let Err(pan) = res {
+                            crate::availability::set_working(false);
+                            working_end();
+                            clear_action();
+                            let cause = panic_msg(&pan);
+                            set_error(&format!(
+                                "bug intercepte pendant une tache (le noeud continue) : {}",
+                                cause
+                            ));
+                            trace(&format!(
+                                "PANIQUE INTERCEPTEE, fil de poll survit : {}",
+                                cause
+                            ));
+                        }
                     }
                 }
             }
@@ -200,6 +333,17 @@ fn node_loop(gateway: String, node_id: String) {
 fn run_and_report(gateway: &str, node_id: &str, chunk: &serde_json::Value) {
     crate::availability::set_working(true);
     set_action("Traitement d'une tache...");
+    // Sprint 36 : echeance annoncee au chien de garde externe. Phase
+    // assets : 600 s de timeout http par fichier + marge ; phase
+    // calcul : le timeout du chunk (300 s si absent, cf container.rs).
+    // Le chien de garde ne declenche QUE si ce delai global est
+    // depasse, jamais pendant un travail legitime long.
+    let ts = chunk["timeout_secs"].as_u64().unwrap_or(0);
+    let echeance_calcul = if ts == 0 { 300 } else { ts.min(3600) };
+    working_begin(
+        chunk["id"].as_str().unwrap_or_default(),
+        600 + 120 + echeance_calcul,
+    );
     let res = run_chunk_gateway(gateway, node_id, chunk);
     crate::availability::set_working(false);
     let payload = serde_json::json!({
@@ -241,6 +385,10 @@ fn run_and_report(gateway: &str, node_id: &str, chunk: &serde_json::Value) {
                     "Envoi du resultat ({:.1} Mo)...",
                     taille as f64 / 1048576.0
                 ));
+                // Sprint 36 : l'envoi a son propre timeout (3600 s dans
+                // http.rs) : nouvelle echeance pour le chien de garde,
+                // sinon il interromprait un upload legitime d'un gros fichier.
+                working_echeance(3600 + 60);
                 if taille > 5 * 1024 * 1024 * 1024 {
                     note = "fichier trop volumineux (5 Go)".to_string();
                     set_error("fichier resultat trop volumineux (5 Go max), non rapatrie");
@@ -249,7 +397,7 @@ fn run_and_report(gateway: &str, node_id: &str, chunk: &serde_json::Value) {
                         Ok(f) => match crate::http::post_file(gateway, "/results", &res.chunk_id, f) {
                             Some(r) if r.status == 200 => {
                                 note = format!("fichier pousse, HTTP 200");
-                                status_cell().lock().unwrap().last_error.clear();
+                                lock_status().last_error.clear();
                             }
                             Some(r) => {
                                 note = format!("refus HTTP {} corps: {}", r.status, r.body);
@@ -299,7 +447,7 @@ fn run_and_report(gateway: &str, node_id: &str, chunk: &serde_json::Value) {
     }
 
     clear_action();
-    let mut st = status_cell().lock().unwrap();
+    let mut st = lock_status();
     if res.outcome == "ok" {
         st.chunks_done += 1;
         // Sprint 26b : on n'efface PAS last_error ici : le message
@@ -309,6 +457,9 @@ fn run_and_report(gateway: &str, node_id: &str, chunk: &serde_json::Value) {
         st.chunks_failed += 1;
         st.last_error = format!("{}: {}", res.outcome, res.detail);
     }
+    // Sprint 36 : tache finie, le chien de garde externe n'a plus rien
+    // a surveiller (appele aussi par le nettoyage de panic du poll).
+    working_end();
 }
 
 /// Sprint 27 : un asset d'entree telecharge et verifie, pret a etre
@@ -459,6 +610,11 @@ fn run_chunk_gateway(
                 };
             }
         };
+        // Sprint 36 : assets poses, place au calcul : l'echeance du
+        // chien de garde se resserre sur le seul timeout du chunk
+        // (300 s par defaut, cf DEFAULT_TIMEOUT_SECS dans container.rs).
+        let echeance_calcul = if spec.timeout_secs == 0 { 300 } else { spec.timeout_secs.min(3600) };
+        working_echeance(120 + echeance_calcul);
         crate::container::run_container_chunk(&spec, &image, gpu, &assets)
     } else {
         crate::sandbox::run_chunk(spec)
@@ -466,18 +622,18 @@ fn run_chunk_gateway(
 }
 
 fn set_error(msg: &str) {
-    status_cell().lock().unwrap().last_error = msg.to_string();
+    lock_status().last_error = msg.to_string();
 }
 
 /// Sprint 33 : action en cours, affichee en direct dans le tableau
 /// de bord (telechargement d'image ou de fichier, calcul, envoi).
 pub(crate) fn set_action(msg: &str) {
-    status_cell().lock().unwrap().current_action = msg.to_string();
+    lock_status().current_action = msg.to_string();
 }
 
 /// Sprint 33 : plus d'action en cours (tache terminee).
 pub(crate) fn clear_action() {
-    status_cell().lock().unwrap().current_action.clear();
+    lock_status().current_action.clear();
 }
 
 /// Sprint 33 : progression lisible : "<label> : 42 % (12,3 Mo / 29,9 Mo)".
@@ -511,4 +667,56 @@ fn chrono_like_now() -> String {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs().to_string())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Sprint 36 : le verrou tolere un mutex empoisonne (panic d'un fil
+    /// pendant qu'il tenait le verrou) sans paniquer a son tour.
+    #[test]
+    fn lock_status_survit_au_poison() {
+        let r = std::panic::catch_unwind(|| {
+            let _g = status_cell().lock().unwrap();
+            panic!("empoisonnement volontaire");
+        });
+        assert!(r.is_err());
+        assert!(status_cell().is_poisoned());
+        // Ne doit PAS paniquer, meme empoisonne :
+        lock_status().last_error.clear();
+    }
+
+    /// Sprint 36 : la cellule du chien de garde suit le cycle complet
+    /// begin -> echeance (changement de phase) -> end.
+    #[test]
+    fn working_cell_cycle_complet() {
+        working_begin("chunk-test", 60);
+        {
+            let w = working_cell().lock();
+            let info = w.as_ref().expect("workinfo attendu");
+            assert_eq!(info.chunk_id, "chunk-test");
+            assert!(info.deadline > std::time::Instant::now());
+        }
+        working_echeance(600);
+        {
+            let w = working_cell().lock();
+            let info = w.as_ref().expect("workinfo attendu");
+            assert!(
+                info.deadline > std::time::Instant::now() + Duration::from_secs(500),
+                "l'echeance doit avoir ete repoussee a +600 s"
+            );
+        }
+        working_end();
+        assert!(working_cell().lock().is_none());
+    }
+
+    /// Sprint 36 : message lisible d'une charge de panic recuperee par
+    /// catch_unwind (String, &str, ou autre chose).
+    #[test]
+    fn panic_msg_lisible() {
+        assert_eq!(panic_msg(&"boum &str"), "boum &str");
+        assert_eq!(panic_msg(&String::from("boum String")), "boum String");
+        assert_eq!(panic_msg(&7u32), "cause inconnue");
+    }
 }

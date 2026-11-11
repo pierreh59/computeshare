@@ -109,6 +109,27 @@ des taches executees dans l'application.
 - En cas de probleme : le journal de l'application indique chaque
   tache et son statut.
 
+### Journal technique et deblocage automatique (v0.7.15)
+
+L'app ecrit un journal technique detaille dans
+`%TEMP%\computeshare-node.log` (touches Windows + R, tapez
+`%TEMP%`, ouvrez `computeshare-node.log`). Chaque tache y est
+tracee etape par etape (telechargement, calcul, envoi), y compris
+d'eventuels problemes interceptes.
+
+Depuis la v0.7.15, l'app est egalement autonome face aux incidents :
+
+- un bug pendant le traitement d'une tache n'arrete plus le noeud :
+  la tache echoue, un message s'affiche, le noeud continue ;
+- un chien de garde surveille chaque tache : si elle depasse son
+  delai, le conteneur bloque est interrompu et le noeud repart,
+  sans intervention de votre cote.
+
+Symptome qui ne devrait plus jamais apparaitre : noeud affiche en
+ligne mais aucune tache traitee pendant des heures. Si cela
+arrive malgre tout, fermez puis rouvrez l'app et envoyez le
+journal ci-dessus au support.
+
 ## 6. Conditions
 
 La participation suppose l'acceptation des CGU (disponibles avant

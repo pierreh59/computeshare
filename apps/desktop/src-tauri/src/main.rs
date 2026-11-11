@@ -17,6 +17,16 @@ mod config;
 mod auth;
 
 fn main() {
+    // Sprint 36 : journaliser TOUTES les panics de l'app (n'importe quel
+    // fil) dans %TEMP%/computeshare-node.log. Une app Windows sans
+    // console avale les panics en silence : c'est ainsi qu'un fil mort
+    // restait invisible le 11 nov. 2026 (noeud en ligne, zero job
+    // traite). Ce hook ne remplace pas le catch_unwind du fil de poll
+    // (node.rs) : il rend visibles les panics des AUTRES fils.
+    std::panic::set_hook(Box::new(|info| {
+        let fil = format!("{:?}", std::thread::current().id());
+        crate::node::trace(&format!("PANIQUE {} : {}", fil, info));
+    }));
     tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
