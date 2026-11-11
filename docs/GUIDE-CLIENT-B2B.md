@@ -16,7 +16,7 @@ les soumissions, et la facturation, y sont rattachees.
 
 ## 2. Soumettre un job
 
-Depuis la console web (https://api.computeshare.fr/console) :
+Depuis la console web (https://api.computeshare.fr/me) apres connexion a votre compte :
 
 1. Renseignez votre cle API dans la section Identite.
 2. Cliquez sur "Actualiser le solde" : vos credits doivent
@@ -34,6 +34,29 @@ Depuis la console web (https://api.computeshare.fr/console) :
 
 Chaque tache s'execute dans un **sandbox** isole : pas d'acces
 reseau, pas d'acces a vos donnees, arret au bout du timeout.
+
+## 2 bis. Jobs prets a l'emploi (recommande pour demarrer)
+
+La console (https://api.computeshare.fr/me) propose une carte
+**"Jobs prets a l'emploi"** : choisissez un modele, televersez vos
+donnees, la console prepare le formulaire entier.
+
+Modeles disponibles (valides sur la plateforme) :
+
+- **Agrandir une photo x4 par IA** (GPU, Real-ESRGAN) : votre photo
+  + le modele IA (telechargeable depuis la console, 64 Mo, une fois).
+- **Convertir une video en MP4** (H.264, compatible partout).
+- **Compacter une video** (gain de place).
+- **Creer une vignette d'une video** (image a 5 s, parametrable).
+- **Extraire l'audio d'une video en MP3**.
+- **Agrandir une photo x4** (classique, sans IA, tres bon marche).
+
+Pour les jobs GPU, cochez la case **"Utiliser une carte graphique"**
+du formulaire (les modeles IA la cochent automatiquement). Sans cette
+case, le job tourne sur CPU : ~100x plus lent pour l'IA.
+
+Les images Docker recettes et les exemples d'appels API sont
+detailles dans `docs/DOCKERS-PRETS-A-EMPLOI.md`.
 
 ## 3. Suivre et piloter
 
@@ -54,7 +77,7 @@ jamais refacture a un tarif different a posteriori.
 
 ## 5. Limites actuelles (phase pilote)
 
-- Jobs en ligne de commande uniquement (pas de conteneurs).
+- Les jobs conteneur (images Docker) sont disponibles ; l'assistance pilote reste a votre cote pour valider votre premiere image.
 - Le nombre de noeuds fournisseurs pilotes est volontairement
   limite : certains jobs peuvent etre en file d'attente.
 - Pour toute question : votre contact pilote ComputeShare.

@@ -438,7 +438,17 @@ const meHTML = `<!DOCTYPE html>
 </div>
 
 <div class="stats">
- <div class="tile"><div class="tile-label">Crédits disponibles</div><div class="tile-value money" id="bal">…</div></div>
+ <style>
+.tpls{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:12px;margin-top:10px}
+.tpl{background:linear-gradient(145deg,#141c33,#101728);border:1px solid #2b3754;border-radius:12px;padding:12px;cursor:pointer;color:#e2e8f0;font-size:14px;line-height:1.45}
+.tpl:hover{border-color:#818cf8;transform:translateY(-2px)}
+.tpl .tpl-ic{font-size:20px;margin-right:6px}
+.tpl .tpl-desc{display:block;color:#94a3b8;font-size:13px;margin:6px 0}
+.tpl-panel{margin-top:14px;padding:12px;border:1px dashed #2b3754;border-radius:12px}
+.tpl-ent{margin:8px 0}
+.tpl-ent>div{margin-bottom:4px;font-size:14px}
+</style>
+<div class="tile"><div class="tile-label">Crédits disponibles</div><div class="tile-value money" id="bal">…</div></div>
  <div class="tile"><div class="tile-label">Dépensé HT (total)</div><div class="tile-value" id="spent">…</div></div>
  <div class="tile"><div class="tile-label">Économie vs AWS</div><div class="tile-value" style="color:var(--cyan)" id="sav">…</div></div>
 </div>
@@ -451,6 +461,12 @@ const meHTML = `<!DOCTYPE html>
 </div>
 
 <div class="card">
+ <h2>Jobs prêts à l'emploi</h2>
+ <p class="muted">Choisissez ce que vous voulez faire : la console prépare tout (image, commande, réglages). Vous n'avez qu'à téléverser vos données et cliquer Soumettre.</p>
+ <div id="modeles"></div>
+</div>
+
+<div class="card" id="soumettre-card">
  <h2>Soumettre un job</h2>
  <label>Type de job</label>
  <select id="rt" onchange="rtChange()" style="width:100%;padding:8px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0">
@@ -462,10 +478,11 @@ const meHTML = `<!DOCTYPE html>
  </div>
  <label>ID du job (unique)</label><input id="jid" value="" autocomplete="off" name="job-id">
  <label>Commande (ex: ffmpeg.exe, ou sh pour un conteneur)</label><input id="cmd" value="ffmpeg.exe">
- <label>Arguments (séparés par des espaces)</label><input id="args" value="">
+ <label>Arguments (séparés par des espaces)</label><input id="args" value="" oninput="ETAT_MODELE.args=null">
  <label>Nombre de tâches</label><input id="count" value="1">
  <label>Nom du fichier résultat (ex: out.mp4)</label><input id="outname" value="out.mp4">
  <label>Délai maximum par tâche (secondes)</label><input id="tmo" value="600">
+ <label style="margin-top:8px;font-weight:normal"><input type="checkbox" id="gpu" style="width:auto"> Utiliser une carte graphique (job GPU, plus rapide pour les modèles IA)</label>
  <div id="assetRow" style="display:none">
   <h2 style="margin-top:18px">Fichiers d'entrée (optionnel)</h2>
   <p class="muted">Téléversez vos fichiers ici : ils seront placés dans /work du conteneur sous leur nom exact (100 Mo max par fichier). Ils sont supprimés du PC du fournisseur à la fin du job.</p>
@@ -543,6 +560,125 @@ function rtChange(){
  document.getElementById('assetRow').style.display=c?'block':'none';
  document.getElementById('cmd').value=c?'sh':'ffmpeg.exe';
 }
+// Sprint 34 : jobs prets a l'emploi (modeles). Chaque modele remplit
+// le formulaire de soumission ; les arguments pre-calcules (scripts IA,
+// options ffmpeg) sont gardes dans argsModele car ils contiennent des
+// espaces et ne doivent pas passer par splitArgs (qui decoupe sur les
+// espaces). Modifier le champ Arguments a la main annule le modele.
+var ETAT_MODELE={args:null};
+var modeleActif=null;
+var tplFichiers={};
+var MODELES=[
+ {id:'upscale-ia',icone:'✨',titre:'Agrandir une photo ×4 (IA, GPU)',
+  desc:'Réal-ESRGAN sur carte graphique : votre photo est agrandie 4× avec une IA qui restaure la netteté. Idéal photos et images produits (évitez les logos tramés). Le premier modèle (64 Mo) est à téléverser une seule fois et reste utilisable pour les jobs suivants.',
+  gpu:true,image:'pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime',cmd:'python',outname:'photo-x4.png',tmo:1800,
+  entrees:[
+   {role:'photo',lib:'votre photo (PNG ou JPG, 6 Mpx max)'},
+   {role:'modele',lib:'le modèle IA RealESRGAN_x4plus.pth (64 Mo)',url:'https://github.com/xinntao/Real-ESRGAN/releases/download/v1.0/RealESRGAN_x4plus.pth'}
+  ],
+  args:function(noms){return ['-c',document.getElementById('tpl-script-upscale').textContent.trim(),noms.photo,noms._sortie];}},
+ {id:'video-mp4',icone:'🎬',titre:'Convertir une vidéo en MP4 (H.264)',
+  desc:'Encode votre vidéo en MP4 H.264/AAC, compatible partout (web, réseaux sociaux, téléphones). Formats acceptés en entrée : MP4, MOV, MKV, AVI, WEBM...',
+  gpu:false,image:'jrottenberg/ffmpeg:6-alpine',cmd:'-i',outname:'video.mp4',tmo:1800,
+  entrees:[{role:'video',lib:'votre vidéo'}],
+  args:function(noms){return [noms.video,'-c:v','libx264','-preset','medium','-crf','23','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k',noms._sortie];}},
+ {id:'video-compacter',icone:'🗜️',titre:'Compacter une vidéo (gain de place)',
+  desc:'Ré-encode votre vidéo pour réduire fortement sa taille, en gardant une bonne qualité. Utile pour archiver ou partager.',
+  gpu:false,image:'jrottenberg/ffmpeg:6-alpine',cmd:'-i',outname:'video-petite.mp4',tmo:1800,
+  entrees:[{role:'video',lib:'votre vidéo'}],
+  args:function(noms){return [noms.video,'-c:v','libx264','-preset','fast','-crf','28','-c:a','aac','-b:a','96k',noms._sortie];}},
+ {id:'vignette',icone:'🖼️',titre:'Créer une vignette d\'une vidéo',
+  desc:'Extrait une image (PNG) de votre vidéo à un moment choisi, par défaut à 5 secondes. Parfait pour une miniature de site ou de player.',
+  gpu:false,image:'jrottenberg/ffmpeg:6-alpine',cmd:'-ss',outname:'vignette.png',tmo:600,
+  entrees:[{role:'video',lib:'votre vidéo'}],
+  args:function(noms){return ['00:00:05','-i',noms.video,'-frames:v','1',noms._sortie];}},
+ {id:'audio-mp3',icone:'🎵',titre:'Extraire l\'audio d\'une vidéo (MP3)',
+  desc:'Récupère la bande son de votre vidéo en MP3 (qualité très bonne).',
+  gpu:false,image:'jrottenberg/ffmpeg:6-alpine',cmd:'-i',outname:'audio.mp3',tmo:600,
+  entrees:[{role:'video',lib:'votre vidéo'}],
+  args:function(noms){return [noms.video,'-vn','-c:a','libmp3lame','-q:a','2',noms._sortie];}},
+ {id:'photo-lanczos',icone:'🔍',titre:'Agrandir une photo ×4 (simple, sans IA)',
+  desc:'Agrandissement classique Lanczos, rapide et très bon marché. La netteté n\'est pas restaurée par IA (préférez le modèle IA pour un meilleur rendu).',
+  gpu:false,image:'jrottenberg/ffmpeg:6-alpine',cmd:'-i',outname:'photo-x4.png',tmo:600,
+  entrees:[{role:'photo',lib:'votre photo (PNG ou JPG)'}],
+  args:function(noms){return [noms.photo,'-vf','scale=iw*4:ih*4:flags=lanczos',noms._sortie];}}
+];
+function renderModeles(){
+ var h='<div class="tpls">';
+ MODELES.forEach(function(m){
+  h+='<button type="button" class="tpl" onclick="choisirModele(\''+m.id+'\')">'
+   +'<span class="tpl-ic">'+m.icone+'</span><b>'+m.titre+'</b><br>'
+   +'<span class="tpl-desc">'+m.desc+'</span><br>'
+   +'<span class="chip '+(m.gpu?'run':'done')+'">'+(m.gpu?'GPU':'CPU')+'</span></button>';
+ });
+ h+='</div><div id="tplPanel"></div>';
+ document.getElementById('modeles').innerHTML=h;
+}
+function choisirModele(id){
+ MODELES.forEach(function(m){if(m.id===id)modeleActif=m;});
+ tplFichiers={};
+ var m=modeleActif;
+ var h='<div class="tpl-panel"><b>'+m.icone+' '+m.titre+'</b>'
+  +'<p class="muted">Étapes : téléversez '+(m.entrees.length>1?'chaque fichier attendu':'le fichier attendu')
+  +' ci-dessous, puis cliquez « Préparer le job ». Tout le formulaire sera rempli automatiquement.</p>';
+ m.entrees.forEach(function(e){
+  h+='<div class="tpl-ent"><div>'+e.lib+(e.url?' — <a href="'+e.url+'" target="_blank" rel="noopener">téléchargez-le ici</a>':'')+'</div>'
+   +'<input type="file" id="tplfile-'+e.role+'" style="color:#e2e8f0"> '
+   +'<button type="button" class="gray" onclick="uploadTpl(\''+e.role+'\')">Téléverser</button>'
+   +'<span id="tplmsg-'+e.role+'" class="ok"></span></div>';
+ });
+ h+='<button type="button" onclick="preparerModele()">Préparer le job</button> <span id="tplfinal"></span></div>';
+ document.getElementById('tplPanel').innerHTML=h;
+}
+function uploadTpl(role){
+ var m=modeleActif;
+ if(!m)return;
+ var f=document.getElementById('tplfile-'+role).files[0];
+ if(!f){document.getElementById('tplmsg-'+role).innerHTML='<span class="err">Choisissez d\'abord un fichier.</span>';return;}
+ if(f.size===0){document.getElementById('tplmsg-'+role).innerHTML='<span class="err">Le fichier est vide (0 octet) : enregistrez-le (Ctrl+S) puis retéléversez-le.</span>';return;}
+ if(f.size>100*1024*1024){document.getElementById('tplmsg-'+role).innerHTML='<span class="err">Fichier trop volumineux (100 Mo max).</span>';return;}
+ document.getElementById('tplmsg-'+role).innerHTML='<span class="muted">Téléversement en cours...</span>';
+ fetch('/v1/assets?filename='+encodeURIComponent(f.name),{
+  method:'POST',
+  headers:{'Authorization':'Bearer '+sess(),'Content-Type':'application/octet-stream'},
+  body:f
+ }).then(function(r){return r.text().then(function(t){
+  var j;try{j=JSON.parse(t);}catch(e){j=null;}
+  if(!r.ok){throw new Error((j&&j.error)||t||('HTTP '+r.status));}
+  return j;});
+ }).then(function(a){
+  tplFichiers[role]={asset_id:a.asset_id,filename:f.name};
+  document.getElementById('tplfile-'+role).value='';
+  mesAssets.push({asset_id:a.asset_id,filename:f.name,size_bytes:a.size_bytes});
+  renderAssets();
+  document.getElementById('tplmsg-'+role).innerHTML=' ✓ '+esc(f.name);
+ }).catch(function(e){document.getElementById('tplmsg-'+role).innerHTML='<span class="err">Erreur : '+esc(e.message)+'</span>';});
+}
+function preparerModele(){
+ var m=modeleActif;
+ if(!m)return;
+ for(var i=0;i<m.entrees.length;i++){
+  var r=m.entrees[i].role;
+  if(!tplFichiers[r]){document.getElementById('tplfinal').innerHTML='<span class="err">Téléversez d\'abord : '+m.entrees[i].lib+'.</span>';return;}
+ }
+ var noms={_sortie:m.outname};
+ m.entrees.forEach(function(e){noms[e.role]=tplFichiers[e.role].filename;});
+ document.getElementById('rt').value='container';
+ document.getElementById('img').value=m.image;
+ document.getElementById('cmd').value=m.cmd;
+ ETAT_MODELE.args=m.args(noms);
+ document.getElementById('args').value='(pré-rempli par le modèle — ne modifiez que si nécessaire)';
+ document.getElementById('count').value='1';
+ document.getElementById('outname').value=m.outname;
+ document.getElementById('tmo').value=String(m.tmo);
+ document.getElementById('gpu').checked=!!m.gpu;
+ document.getElementById('jid').value=m.id+'-'+Math.random().toString(36).slice(2,8);
+ document.getElementById('imgRow').style.display='block';
+ document.getElementById('assetRow').style.display='block';
+ document.getElementById('tplfinal').innerHTML='<span class="ok">✓ Job prêt ! Défilez jusqu\'à « Soumettre un job » et cliquez Soumettre.</span>';
+}
+renderModeles();
+
 // Sprint 27b : upload d'assets d'entree depuis la console (avant
 // l'API, c'etait reserve a curl). Le fichier est envoye brut dans le
 // corps de la requete, le nom passe en parametre d'URL.
@@ -598,7 +734,7 @@ function submitJob(){
  var id=document.getElementById('jid').value.trim();
  if(!id){document.getElementById('msg').innerHTML='<p class="err">Choisissez un ID de job.</p>';return;}
  var body={id:id,command:document.getElementById('cmd').value.trim(),
-  args:splitArgs(document.getElementById('args').value),
+  args:(ETAT_MODELE.args||splitArgs(document.getElementById('args').value)),
   task_count:parseInt(document.getElementById('count').value)||1,
   timeout_secs:parseInt(document.getElementById('tmo').value)||600,
   output_name:document.getElementById('outname').value.trim()};
@@ -607,6 +743,9 @@ function submitJob(){
   // Sprint 27b : les fichiers televerses ci-dessus sont attaches
   // au job (injection dans /work du conteneur, sprint 27).
   if(mesAssets.length){body.asset_ids=mesAssets.map(function(a){return a.asset_id;});}}
+  // Sprint 34 : job GPU si la case est cochee (perdue lors du relooking
+  // sprint 23, vue en vrai : le job GPU de Pierre tournait sur CPU -> timeout).
+  if(document.getElementById('gpu').checked){body.gpu=true;}
  api('/v1/jobs',{method:'POST',body:JSON.stringify(body)}).then(function(r){
   document.getElementById('msg').innerHTML='<p class="ok">Job '+esc(r.job_id)+' soumis ('+r.task_count+' tâches).</p>';
   document.getElementById('jid').value='';
@@ -661,6 +800,105 @@ refreshJobs();
 jobsPoll=setInterval(refreshJobs,5000);
 </script>
 </div>
+<script type="text/plain" id="tpl-script-upscale">
+import sys, os
+import torch, torch.nn as nn
+import torch.nn.functional as F
+from PIL import Image
+import numpy as np
+
+class ResidualDenseBlock(nn.Module):
+    def __init__(self, num_feat=64, num_grow_ch=32):
+        super(ResidualDenseBlock, self).__init__()
+        self.conv1 = nn.Conv2d(num_feat, num_grow_ch, 3, 1, 1)
+        self.conv2 = nn.Conv2d(num_feat + num_grow_ch, num_grow_ch, 3, 1, 1)
+        self.conv3 = nn.Conv2d(num_feat + 2 * num_grow_ch, num_grow_ch, 3, 1, 1)
+        self.conv4 = nn.Conv2d(num_feat + 3 * num_grow_ch, num_grow_ch, 3, 1, 1)
+        self.conv5 = nn.Conv2d(num_feat + 4 * num_grow_ch, num_feat, 3, 1, 1)
+        self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
+    def forward(self, x):
+        x1 = self.lrelu(self.conv1(x))
+        x2 = self.lrelu(self.conv2(torch.cat([x, x1], 1)))
+        x3 = self.lrelu(self.conv3(torch.cat([x, x1, x2], 1)))
+        x4 = self.lrelu(self.conv4(torch.cat([x, x1, x2, x3], 1)))
+        x5 = self.conv5(torch.cat([x, x1, x2, x3, x4], 1))
+        return x5 * 0.2 + x
+
+class RRDB(nn.Module):
+    def __init__(self, num_feat=64, num_grow_ch=32):
+        super(RRDB, self).__init__()
+        self.rdb1 = ResidualDenseBlock(num_feat, num_grow_ch)
+        self.rdb2 = ResidualDenseBlock(num_feat, num_grow_ch)
+        self.rdb3 = ResidualDenseBlock(num_feat, num_grow_ch)
+    def forward(self, x):
+        out = self.rdb1(x)
+        out = self.rdb2(out)
+        out = self.rdb3(out)
+        return out * 0.2 + x
+
+class RRDBNet(nn.Module):
+    def __init__(self, num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32):
+        super(RRDBNet, self).__init__()
+        self.conv_first = nn.Conv2d(num_in_ch, num_feat, 3, 1, 1)
+        self.body = nn.Sequential(*[RRDB(num_feat, num_grow_ch) for _ in range(num_block)])
+        self.conv_body = nn.Conv2d(num_feat, num_feat, 3, 1, 1)
+        self.conv_up1 = nn.Conv2d(num_feat, num_feat, 3, 1, 1)
+        self.conv_up2 = nn.Conv2d(num_feat, num_feat, 3, 1, 1)
+        self.conv_hr = nn.Conv2d(num_feat, num_feat, 3, 1, 1)
+        self.conv_last = nn.Conv2d(num_feat, num_out_ch, 3, 1, 1)
+        self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
+    def forward(self, x):
+        feat = self.conv_first(x)
+        body_feat = self.conv_body(self.body(feat))
+        feat = feat + body_feat
+        feat = self.lrelu(self.conv_up1(F.interpolate(feat, scale_factor=2, mode='nearest')))
+        feat = self.lrelu(self.conv_up2(F.interpolate(feat, scale_factor=2, mode='nearest')))
+        return self.conv_last(self.lrelu(self.conv_hr(feat)))
+
+dev = 'cuda' if torch.cuda.is_available() else 'cpu'
+pth = None
+for f in os.listdir('/work'):
+    if f.endswith('.pth'):
+        pth = f
+        break
+if pth is None:
+    print('modele .pth introuvable : televersez RealESRGAN_x4plus.pth')
+    sys.exit(1)
+net = RRDBNet()
+sd = torch.load('/work/' + pth, map_location='cpu', weights_only=True)
+if 'params_ema' in sd:
+    sd = sd['params_ema']
+net.load_state_dict(sd)
+net = net.to(dev).eval()
+
+img = Image.open('/work/' + sys.argv[1]).convert('RGB')
+W, H = img.size
+if W * H > 6400000:
+    print('photo trop grande : ' + str(W) + 'x' + str(H) + ' (6 Mpx max)')
+    sys.exit(1)
+arr = np.asarray(img)
+out = np.zeros((H * 4, W * 4, 3), dtype=np.uint8)
+T = 256
+M = 16
+with torch.no_grad():
+    for y in range(0, H, T):
+        for x in range(0, W, T):
+            x2 = min(x + T, W)
+            y2 = min(y + T, H)
+            cx0 = max(x - M, 0)
+            cy0 = max(y - M, 0)
+            cx1 = min(x2 + M, W)
+            cy1 = min(y2 + M, H)
+            tile = arr[cy0:cy1, cx0:cx1, ::-1].copy()
+            t = torch.from_numpy(tile).permute(2, 0, 1).unsqueeze(0).float().div(255.0).to(dev)
+            r = net(t)
+            r = r.squeeze(0).clamp(0, 1).mul(255.0).round().byte().permute(1, 2, 0).cpu().numpy()
+            ox = (x - cx0) * 4
+            oy = (y - cy0) * 4
+            out[y*4:y2*4, x*4:x2*4] = r[oy:oy+(y2-y)*4, ox:ox+(x2-x)*4, ::-1]
+Image.fromarray(out).save('/work/' + sys.argv[2])
+print('upscale x4 OK : ' + str(W) + 'x' + str(H) + ' -> ' + str(W*4) + 'x' + str(H*4))
+</script>
 </body>
 </html>`
 
