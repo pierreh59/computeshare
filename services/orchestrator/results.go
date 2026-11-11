@@ -241,6 +241,15 @@ func downloadResult(orgs *OrgStore, c *Chunker, store *Store) http.HandlerFunc {
 				}
 			}
 		}
+		// Sprint 39c (retour Pierre) : apres un redemarrage le chunk
+		// n'est plus en memoire, le nom du fichier vient alors des
+		// resultats persistes (sinon le telechargement livrait
+		// result.bin alors que le nom est bien connu en base).
+		if allowed && fileName == "" {
+			if row := store.LoadResult(chunkID); row != nil {
+				fileName = row.FileName
+			}
+		}
 		if !allowed {
 			if org == nil {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
