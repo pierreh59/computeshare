@@ -68,9 +68,10 @@ RTX 50xx (Blackwell) exigent CUDA 12.8+, donc cette image.
 - Job GPU : cocher "Utiliser une carte graphique" dans la console
   (ou `"gpu": true` dans l'API).
 - Modele d'upscale photo (Real-ESRGAN x4) : le modele
-  `RealESRGAN_x4plus.pth` (64 Mo) se telecharge ici :
+  `RealESRGAN_x4.pth` (67 Mo) se telecharge ici :
   https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/RealESRGAN_x4.pth
-  (renommez le fichier RealESRGAN_x4plus.pth). Il est televerse comme
+  (aucun renommage necessaire, sprint 35 : la console pointe
+  directement ce lien). Il est televerse comme
   fichier d'entree, une fois ; il reste utilisable pour tous vos jobs.
 - La console propose le modele "Agrandir une photo x4 (IA, GPU)" qui
   emballe tout : script PyTorch complet, traitement par tuiles

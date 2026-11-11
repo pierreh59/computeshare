@@ -325,48 +325,65 @@ func (c *Chunker) Complete(chunkID, nodeID, outcome, sha, detail string, duratio
 }
 
 // rescheduleLoop (LAI-27) : toutes les 10 s, les chunks "running"
-// dont le noeud a disparu sont redistribues. Apres 3 tentatives,
-// le chunk passe en echec definitif.
-// Sprint 22 : on attend aussi l'expiration du timeout du chunk avant
-// de redistribuer (un job conteneur de 5 min avec le heartbeat bloque
+// orphelins sont redistribues. Apres 3 tentatives, le chunk passe en
+// echec definitif.
+// Sprint 22 : on attend l'expiration du timeout du chunk avant de
+// redistribuer (un job conteneur de 5 min avec le heartbeat bloque
 // etait redistribue au milieu de son execution).
+// Sprint 35 : un chunk "running" dont le delai est depasse est
+// orphelin QUE LE NOEUD SOIT EN LIGNE OU HORS LIGNE. Cas reel du
+// 11 nov. : l'app desktop fermee en plein job et relancee revient
+// "en ligne" mais ne connait plus son chunk (perte d'etat locale) ;
+// l'ancienne condition IsOnline laissait alors le chunk bloque a vie
+// en "running" (dashboard : "job en cours", app : "accepte du
+// travail"). Le delai de securite du chunk (timeout + 60 s) laisse
+// au noeud legitime le temps de rapporter son echec local (le
+// desktop tue le conteneur au timeout et rapporte).
 func (c *Chunker) rescheduleLoop() {
 	for range time.Tick(10 * time.Second) {
-		c.mu.Lock()
-		online := c.reg.OnlineNodes()
-		for _, ch := range c.chunks {
-			if ch.Status != "running" || c.reg.IsOnline(ch.NodeID) {
-				continue
-			}
-			// Sprint 22 : grace period = timeout du chunk (300 s min).
-			grace := ch.TimeoutSecs
-			if grace < 300 {
-				grace = 300
-			}
-			if time.Since(ch.StartedAt) < time.Duration(grace)*time.Second {
-				continue
-			}
-			if ch.Attempts >= maxChunkAttempts {
-				ch.Status = "failed"
-				c.store.SaveChunk(ch)
-				// Sprint 31 : si c etait le dernier chunk du job, le
-				// client est prevenu (e-mail job termine).
-				if notifier != nil && ch.OrgID != "" {
-					if d, f, cz, fin := c.jobFinishedStats(ch.JobID); fin {
-						cost, _, _ := c.billing.JobCost(ch.OrgID, ch.JobID)
-						notifier.JobFinished(ch.OrgID, ch.JobID, d, f, cz, cost)
-					}
-				}
-				continue
-			}
-			if next := pickNode(online, ch); next != "" {
-				ch.NodeID = next
-				ch.Status = "queued"
-				c.store.SaveChunk(ch)
-			}
-			// Aucun noeud dispo : on retente au prochain tick.
+		c.reschedulePass()
+	}
+}
+
+// reschedulePass : une iteration du re-scheduler, extractible pour
+// les tests (sprint 35).
+func (c *Chunker) reschedulePass() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	online := c.reg.OnlineNodes()
+	for _, ch := range c.chunks {
+		if ch.Status != "running" {
+			continue
 		}
-		c.mu.Unlock()
+		// Sprint 22 : grace period = timeout du chunk (300 s min).
+		grace := ch.TimeoutSecs
+		if grace < 300 {
+			grace = 300
+		}
+		// Sprint 35 : marge de 60 s pour le compte-rendu du noeud.
+		grace += 60
+		if time.Since(ch.StartedAt) < time.Duration(grace)*time.Second {
+			continue
+		}
+		if ch.Attempts >= maxChunkAttempts {
+			ch.Status = "failed"
+			c.store.SaveChunk(ch)
+			// Sprint 31 : si c etait le dernier chunk du job, le
+			// client est prevenu (e-mail job termine).
+			if notifier != nil && ch.OrgID != "" {
+				if d, f, cz, fin := c.jobFinishedStats(ch.JobID); fin {
+					cost, _, _ := c.billing.JobCost(ch.OrgID, ch.JobID)
+					notifier.JobFinished(ch.OrgID, ch.JobID, d, f, cz, cost)
+				}
+			}
+			continue
+		}
+		if next := pickNode(online, ch); next != "" {
+			ch.NodeID = next
+			ch.Status = "queued"
+			c.store.SaveChunk(ch)
+		}
+		// Aucun noeud dispo : on retente au prochain tick.
 	}
 }
 
@@ -396,6 +413,20 @@ func pickNode(online []Node, ch *Chunk) string {
 		if n.ID != ch.NodeID {
 			return n.ID
 		}
+	}
+	// Sprint 35 : en dernier recours, le noeud d'origine peut
+	// reprendre son chunk. Cas reel du 11 nov. : nœud GPU unique
+	// redemarre en plein job - personne d'autre ne peut prendre le
+	// chunk, mais lui peut le rejouer depuis zero (son app ne
+	// garde aucun etat des chunks d'une session precedente).
+	for _, n := range online {
+		if ch.Runtime == "container" && !n.WSL2Ready {
+			continue
+		}
+		if ch.Gpu && !n.GpuReady {
+			continue
+		}
+		return n.ID
 	}
 	return ""
 }

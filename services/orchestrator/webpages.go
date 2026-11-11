@@ -574,7 +574,7 @@ var MODELES=[
   gpu:true,image:'pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime',cmd:'python',outname:'photo-x4.png',tmo:1800,
   entrees:[
    {role:'photo',lib:'votre photo (PNG ou JPG, 6 Mpx max)'},
-   {role:'modele',lib:'le modèle IA RealESRGAN_x4plus.pth (64 Mo)',url:'https://github.com/xinntao/Real-ESRGAN/releases/download/v1.0/RealESRGAN_x4plus.pth'}
+   {role:'modele',lib:'le modèle IA RealESRGAN_x4.pth (67 Mo, lien ci-dessous)',url:'https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/RealESRGAN_x4.pth'}
   ],
   args:function(noms){return ['-c',document.getElementById('tpl-script-upscale').textContent.trim(),noms.photo,noms._sortie];}},
  {id:'video-mp4',icone:'🎬',titre:'Convertir une vidéo en MP4 (H.264)',
@@ -862,7 +862,7 @@ for f in os.listdir('/work'):
         pth = f
         break
 if pth is None:
-    print('modele .pth introuvable : televersez RealESRGAN_x4plus.pth')
+    print('modele .pth introuvable : televersez RealESRGAN_x4.pth')
     sys.exit(1)
 net = RRDBNet()
 sd = torch.load('/work/' + pth, map_location='cpu', weights_only=True)

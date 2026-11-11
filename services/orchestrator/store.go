@@ -195,12 +195,15 @@ func (s *Store) SaveChunk(ch *Chunk) {
 	}
 	args, _ := json.Marshal(ch.Args)
 	assets, _ := json.Marshal(ch.AssetIDs)
+	// Sprint 35 : runtime + image + gpu persistes (sinon un chunk
+	// conteneur recharge apres restart orchestrateur etait refuse
+	// "hors allowlist" par le nœud).
 	_, err := s.db.Exec(`INSERT INTO runtime_chunks
 		(id, job_id, node_id, command, args, expected_output, timeout_secs,
 		 status, result_sha256, price_eur_per_hour, payout_eur,
 		 attempts, zone, assets, duration_secs, sampled, org_id,
-		 pull_ms, compute_ms, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19, now())
+		 pull_ms, compute_ms, runtime, image, gpu, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22, now())
 		ON CONFLICT (id) DO UPDATE SET
 		  status=EXCLUDED.status,
 		  result_sha256=EXCLUDED.result_sha256,
@@ -212,13 +215,16 @@ func (s *Store) SaveChunk(ch *Chunk) {
 		  pull_ms=EXCLUDED.pull_ms,
 		  compute_ms=EXCLUDED.compute_ms,
 		  sampled=EXCLUDED.sampled,
+		  runtime=EXCLUDED.runtime,
+		  image=EXCLUDED.image,
+		  gpu=EXCLUDED.gpu,
 		  updated_at=now()`,
 		ch.ID, ch.JobID, ch.NodeID, ch.Command, string(args), ch.ExpectedOutput,
 		ch.TimeoutSecs, ch.Status, nullStr(ch.ResultSHA256),
 		ch.PriceEurPerHour, ch.PayoutEur,
 		ch.Attempts, nullStr(ch.Zone), string(assets),
 		ch.DurationSecs, ch.Sampled, ch.OrgID,
-		ch.PullMS, ch.ComputeMS)
+		ch.PullMS, ch.ComputeMS, ch.Runtime, ch.Image, ch.Gpu)
 	if err != nil {
 		log.Printf("store.SaveChunk: %v", err)
 	}
@@ -567,9 +573,12 @@ func (s *Store) LoadAll(reg *Registry, pricing *Pricing, chunker *Chunker, orgs 
 	}
 
 	// 4. Chunks non termines (running -> queued, re-claimables).
+	// Sprint 35 : runtime + image + gpu relus (sinon un chunk conteneur
+	// recharge devenait un job "allowlist" refuse par le noeud :
+	// "rejected - commande hors allowlist").
 	rows, err = s.db.Query(`SELECT id, job_id, node_id, command, args,
 		expected_output, timeout_secs, price_eur_per_hour,
-		attempts, zone, assets, org_id
+		attempts, zone, assets, org_id, runtime, image, gpu
 		FROM runtime_chunks WHERE status IN ('queued','running')`)
 	if err != nil {
 		log.Printf("store.LoadAll(chunks): %v", err)
@@ -580,8 +589,11 @@ func (s *Store) LoadAll(reg *Registry, pricing *Pricing, chunker *Chunker, orgs 
 			var attempts int
 			var zone sql.NullString
 			var assetsJSON string
+			var runtime, image string
+			var gpu bool
 			if rows.Scan(&id, &jobID, &nodeID, &cmd, &argsJSON, &output,
-				&timeout, &price, &attempts, &zone, &assetsJSON, &orgID) == nil {
+				&timeout, &price, &attempts, &zone, &assetsJSON, &orgID,
+				&runtime, &image, &gpu) == nil {
 				var args, assets []string
 				if json.Unmarshal([]byte(argsJSON), &args) != nil {
 					args = nil
@@ -600,6 +612,11 @@ func (s *Store) LoadAll(reg *Registry, pricing *Pricing, chunker *Chunker, orgs 
 					Attempts:        attempts,
 					Zone:            zone.String,
 					AssetIDs:        assets,
+						// Sprint 35 : le chunk recharge reste un job conteneur
+						// identique (image + gpu conserves).
+						Runtime:         runtime,
+						Image:           image,
+						Gpu:             gpu,
 				})
 			}
 		}
