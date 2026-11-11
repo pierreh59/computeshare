@@ -36,6 +36,10 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
       # Sprint 32 : destinataire du bilan hebdo (vide : pas d'envoi auto).
       REPORT_EMAIL: ${REPORT_EMAIL:-}
+      # Sprint 37 : assistant conversationnel. MISTRAL_API_KEY vient du
+      # .env (sans cle : l assistant repond via la FAQ interne).
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      MISTRAL_CHAT_MODEL: ${MISTRAL_CHAT_MODEL:-}
     volumes:
       - resultsdata:/data
     logging:

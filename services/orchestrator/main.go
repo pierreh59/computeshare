@@ -12,7 +12,7 @@ import (
 
 // orchestratorVersion : version de l'orchestrateur, affichee sur le
 // dashboard admin et dans /healthz. A incrementer a chaque sprint.
-const orchestratorVersion = "v0.29.0"
+const orchestratorVersion = "v0.30.0"
 
 func main() {
 	port := os.Getenv("PORT")
@@ -49,6 +49,9 @@ func main() {
 	// Sprint 32 : bilan d'activite hebdo par e-mail (REPORT_EMAIL).
 	reporter := NewReporter(billing, wallet, registry, accounts.emails)
 	reporter.StartWeekly()
+	// Sprint 37 : assistant conversationnel en ligne (bulle de chat).
+	// Mode degrade sans MISTRAL_API_KEY : FAQ interne uniquement.
+	chatBot := NewChatBot(accounts, chunker, billing, wallet, registry, accounts.emails)
 	store.LoadWallet(wallet)
 	store.LoadBilling(billing)
 	wallet.Start()
@@ -451,6 +454,10 @@ func main() {
 	})
 	http.HandleFunc("/admin/billing/refund", adminBillingRefund(billing))
 	http.HandleFunc("/admin/report/email", adminReportEmail(reporter))
+	// Sprint 37 : assistant en ligne (POST public, CORS ouvert pour la
+	// vitrine ; les actions exigent une session).
+	http.HandleFunc("/chat", chatBot.handleChat)
+	http.HandleFunc("/chat/action", chatBot.handleChatAction)
 
 	// Sprint 14 : TLS optionnel. Si TLS_CERT_FILE et TLS_KEY_FILE sont
 	// definis (ex. Let's Encrypt ou certificat interne), l'orchestrateur
