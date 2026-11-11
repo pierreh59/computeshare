@@ -316,10 +316,11 @@ func adminDashData(reg *Registry, c *Chunker, f *Fraud, accounts *AccountStore, 
 			events = dbEvents
 		}
 		writeJSON(w, map[string]interface{}{
-			"nodes":  out,
-			"jobs":   dashJobs(c, orgs),
-			"events": events,
-			"fraud":  f.Alerts(),
+			"nodes":          out,
+			"jobs":           dashJobs(c, orgs),
+			"recent_results": c.DashRecentResults(12),
+			"events":         events,
+			"fraud":          f.Alerts(),
 			"stats": map[string]interface{}{
 				"online":        online,
 				"total":         len(nodes),
@@ -608,6 +609,11 @@ h2{font-size:16px;margin:0}
 </div>
 
 <div class="card">
+<h2>&#11015;&#65039; Derniers r&eacute;sultats (t&eacute;l&eacute;chargeables 30 jours)</h2>
+<div id="recentres" class="muted">Chargement...</div>
+</div>
+
+<div class="card">
 <h2>&#128176; Credits des entreprises clientes</h2>
 <div class="row">
 <input id="orgid" placeholder="org-id (ex: org-87d96e97)" size="26">
@@ -657,6 +663,18 @@ function api(path, body){
   });
 }
 function fmt(t){return new Date(t).toLocaleTimeString('fr-FR');}
+function renderRecentResults(list){
+  var el=document.getElementById('recentres');
+  if(!list||!list.length){el.innerHTML='<span class="muted">Aucun resultat termine pour le moment.</span>';return;}
+  var h='<table><tr><th>Fichier</th><th>Job</th><th>Termin&eacute;</th><th></th></tr>';
+  list.forEach(function(r){
+    var dl='/admin/dash/result/'+encodeURIComponent(r.chunk_id)+'?key='+encodeURIComponent(akey());
+    h+='<tr><td>'+esc(r.file||'result.bin')+'</td><td>'+esc(r.job_id)+'</td><td>'+esc(r.updated_at)+'</td>'+
+       '<td><a href="'+dl+'" download><button>T&eacute;l&eacute;charger</button></a></td></tr>';
+  });
+  h+='</table>';
+  el.innerHTML=h;
+}
 var usearchTimer=null;
 var usearchInput=document.getElementById('usearch');
 function renderUserRow(u){
@@ -784,6 +802,7 @@ function load(){
     safe(function(){renderMap(d.nodes||[]);});
     safe(function(){renderBoard(d.nodes||[]);});
     safe(function(){renderJobs(d.jobs||[]);});
+    safe(function(){renderRecentResults(d.recent_results||[]);});
     safe(function(){renderLog(d.events||[]);});
     document.getElementById('lastup').textContent='Derniere mise a jour: '+new Date().toLocaleTimeString('fr-FR');
   }).catch(function(e){

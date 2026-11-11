@@ -139,17 +139,30 @@ func (e *Emailer) SendReset(email, token string) {
 
 // SendJobDone : e-mail "votre job est termine" (Sprint 31). Envoi en
 // goroutine depuis le Notifier - ne bloque jamais la completion.
-func (e *Emailer) SendJobDone(email, jobID string, done, failed int, costEur float64) {
+func (e *Emailer) SendJobDone(email, jobID string, done, failed int, costEur float64, doneChunks []Chunk) {
 	url := e.baseURL + "/me"
 	intro := fmt.Sprintf("Bonjour,<br><br>Votre job <b>%s</b> est terminé : <b>%d</b> tâche(s) réussie(s)", jobID, done)
 	if failed > 0 {
 		intro += fmt.Sprintf(" et <b>%d</b> en échec", failed)
 	}
 	intro += fmt.Sprintf(".<br>Coût réel facturé : <b>%.6f EUR HT</b>.", costEur)
+	outro := "Les fichiers de résultats restent téléchargeables 30 jours depuis votre console."
+	// Sprint 39 : boutons de telechargement direct, un par tache
+	// reussie (liens signes valables 7 jours).
+	links := BuildResultLinks(e.baseURL, doneChunks)
+	if len(links) > 0 {
+		outro = "Téléchargez vos fichiers ci-dessus ou depuis votre console. Les liens directs restent valides 7 jours ; les fichiers, 30 jours."
+		btns := ""
+		for _, l := range links {
+			btns += `<p style="text-align:center;margin:10px 0"><a href="` + l.URL +
+				`" style="background:#16a34a;color:#ffffff;padding:10px 20px;border-radius:8px;text-decoration:none">⬇ Télécharger ` + l.FileName + `</a></p>`
+		}
+		intro += "<br>" + btns
+	}
 	html := emailShellNote(
 		"Vous recevez cet e-mail car vous avez un compte client ComputeShare. Vous pouvez désactiver ces notifications depuis votre console.",
 		intro, url, "Voir mes résultats",
-		"Les fichiers de résultats restent téléchargeables 30 jours depuis votre console.")
+		outro)
 	if err := e.send(email, "Votre job "+jobID+" est terminé - ComputeShare", html); err != nil {
 		log.Printf("email: job termine non envoye a %s : %v", email, err)
 	} else {

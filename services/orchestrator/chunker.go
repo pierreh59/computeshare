@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -91,6 +92,9 @@ type Chunk struct {
 	// Sprint 30 : heures (memoire) pour le journal admin.
 	PullHours    float64 `json:"-"`
 	ComputeHours float64 `json:"-"`
+	// Sprint 39 : heure de fin (memoire), sert a trier les derniers
+	// resultats telechargeables du dashboard admin.
+	UpdatedAt time.Time `json:"-"`
 }
 
 // Chunker : ordre de creation conserve pour une distribution stable.
@@ -277,6 +281,7 @@ func (c *Chunker) Complete(chunkID, nodeID, outcome, sha, detail string, duratio
 			}
 			// Sprint 22 : le rapport vient du vrai executeur.
 			ch.NodeID = nodeID
+			ch.UpdatedAt = time.Now()
 			// Sprint 17 : journal temps reel du dashboard admin.
 			if outcome == "ok" {
 				dashLog("chunk_done", fmt.Sprintf("%s termine par %s (calcul %.0f s, pull %.0f s, verse %.6f EUR)",
@@ -312,7 +317,8 @@ func (c *Chunker) Complete(chunkID, nodeID, outcome, sha, detail string, duratio
 			if notifier != nil && ch.OrgID != "" {
 				if d, f, cz, fin := c.jobFinishedStats(ch.JobID); fin {
 					cost, _, _ := c.billing.JobCost(ch.OrgID, ch.JobID)
-					notifier.JobFinished(ch.OrgID, ch.JobID, d, f, cz, cost)
+					done := c.jobChunksLocked(ch.JobID)
+					notifier.JobFinished(ch.OrgID, ch.JobID, d, f, cz, cost, done)
 				}
 				if outcome == "ok" {
 					notifier.MaybeLowCredits(ch.OrgID, c.billing.Balance(ch.OrgID))
@@ -373,7 +379,8 @@ func (c *Chunker) reschedulePass() {
 			if notifier != nil && ch.OrgID != "" {
 				if d, f, cz, fin := c.jobFinishedStats(ch.JobID); fin {
 					cost, _, _ := c.billing.JobCost(ch.OrgID, ch.JobID)
-					notifier.JobFinished(ch.OrgID, ch.JobID, d, f, cz, cost)
+					done := c.jobChunksLocked(ch.JobID)
+					notifier.JobFinished(ch.OrgID, ch.JobID, d, f, cz, cost, done)
 				}
 			}
 			continue
@@ -495,6 +502,50 @@ func seqOf(id string) int {
 }
 
 // JobStatus resume l'avancement d'un job (comptages par statut).
+// jobChunksLocked (Sprint 39) : COPIE des chunks d'un job (appele
+// sous le verrou du chunker), pour construire les liens de
+// telechargement de l'e-mail job termine.
+func (c *Chunker) jobChunksLocked(jobID string) []Chunk {
+	out := make([]Chunk, 0, 4)
+	for _, ch := range c.chunks {
+		if ch.JobID == jobID {
+			out = append(out, *ch)
+		}
+	}
+	return out
+}
+
+// DashRecentResults (Sprint 39) : derniers chunks termines (pour le
+// dashboard admin), du plus recent au plus ancien.
+func (c *Chunker) DashRecentResults(limit int) []map[string]interface{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	type res struct {
+		id, job, org, file string
+		at                 time.Time
+	}
+	var all []res
+	for _, ch := range c.chunks {
+		if ch.Status != "done" {
+			continue
+		}
+		all = append(all, res{ch.ID, ch.JobID, ch.OrgID, ch.ExpectedOutput, ch.UpdatedAt})
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].at.After(all[j].at) })
+	out := []map[string]interface{}{}
+	n := limit
+	if len(all) < n {
+		n = len(all)
+	}
+	for _, a := range all[:n] {
+		out = append(out, map[string]interface{}{
+			"chunk_id": a.id, "job_id": a.job, "file": a.file,
+			"updated_at": a.at.Format("02/01 15:04"),
+		})
+	}
+	return out
+}
+
 // jobFinishedStats (Sprint 31) : sous le verrou du chunker, compte les
 // statuts terminaux d un job et dit s il est ENTIEREMENT termine
 // (aucun chunk en file ni en cours). Sert a declencher l e-mail

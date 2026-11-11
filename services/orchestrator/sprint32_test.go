@@ -31,7 +31,7 @@ func TestBilanHebdoAgregats(t *testing.T) {
 	defer os.Unsetenv("ASSETS_DIR")
 
 	reg, chunker, billing, wallet := newTestStack32(t)
-	reg.Register("node-r32", "GPU R32", "prosumer", "europe", "fp-r32", false, false)
+	reg.Register("node-r32", "GPU R32", "prosumer", "europe", "fp-r32", false, true) // sprint 39 : jobs tous GPU
 	store := NewStore()
 	assets := NewAssetStore(store)
 	orgs := NewOrgStore(store)

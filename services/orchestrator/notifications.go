@@ -32,12 +32,12 @@ type delivery struct {
 // Notifier : file des notifications clients. Le champ deliveries sert
 // uniquement de journal interne verifiable par les tests.
 type Notifier struct {
-	mu          sync.Mutex
-	accounts    *AccountStore
-	emails      *Emailer
-	sent        map[string]bool // job_id -> e-mail "job termine" deja emis
-	lowAlerted  map[string]bool // org_id -> alerte "credits bas" deja emise
-	deliveries  []delivery
+	mu         sync.Mutex
+	accounts   *AccountStore
+	emails     *Emailer
+	sent       map[string]bool // job_id -> e-mail "job termine" deja emis
+	lowAlerted map[string]bool // org_id -> alerte "credits bas" deja emise
+	deliveries []delivery
 }
 
 // notifier : instance globale branchee par main.go (meme pattern que
@@ -76,7 +76,7 @@ func (n *Notifier) record(kind, email, ref string) {
 // Chunker.Complete (et le re-scheduler) sous le verrou du chunker :
 // les seuls acces ici sont rapides (maps + lecture compte), l envoi
 // Brevo part en goroutine.
-func (n *Notifier) JobFinished(orgID, jobID string, done, failed, canceled int, costEur float64) {
+func (n *Notifier) JobFinished(orgID, jobID string, done, failed, canceled int, costEur float64, doneChunks []Chunk) {
 	if n == nil || orgID == "" || jobID == "" {
 		return
 	}
@@ -100,7 +100,7 @@ func (n *Notifier) JobFinished(orgID, jobID string, done, failed, canceled int, 
 	n.record("job_done", u.Email, jobID)
 	dashLog("notif", fmt.Sprintf("job %s termine : e-mail programme pour %s (%d ok, %d echecs)",
 		jobID, u.Email, done, failed))
-	go n.emails.SendJobDone(u.Email, jobID, done, failed, costEur)
+	go n.emails.SendJobDone(u.Email, jobID, done, failed, costEur, doneChunks)
 }
 
 // MaybeLowCredits : appele apres chaque facturation de chunk. Le flag

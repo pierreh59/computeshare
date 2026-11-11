@@ -44,7 +44,7 @@ func TestNotificationJobTermine(t *testing.T) {
 	defer os.Unsetenv("ASSETS_DIR")
 
 	reg, chunker, billing := newTestStack31(t)
-	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a", false, false)
+	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a", false, true) // sprint 39 : jobs tous GPU
 	store := NewStore()
 	assets := NewAssetStore(store)
 	orgs := NewOrgStore(store)
@@ -106,7 +106,7 @@ func TestNotificationCreditsBasUneSeuleFois(t *testing.T) {
 	defer os.Unsetenv("ASSETS_DIR")
 
 	reg, chunker, billing := newTestStack31(t)
-	reg.Register("node-b", "GPU B", "prosumer", "europe", "fp-b", false, false)
+	reg.Register("node-b", "GPU B", "prosumer", "europe", "fp-b", false, true) // sprint 39 : jobs tous GPU
 	store := NewStore()
 	assets := NewAssetStore(store)
 	orgs := NewOrgStore(store)
@@ -170,7 +170,7 @@ func TestOptOutNotifications(t *testing.T) {
 	defer os.Unsetenv("ASSETS_DIR")
 
 	reg, chunker, billing := newTestStack31(t)
-	reg.Register("node-c", "GPU C", "prosumer", "europe", "fp-c", false, false)
+	reg.Register("node-c", "GPU C", "prosumer", "europe", "fp-c", false, true) // sprint 39 : jobs tous GPU
 	store := NewStore()
 	assets := NewAssetStore(store)
 	orgs := NewOrgStore(store)
@@ -220,7 +220,7 @@ func TestJobAnnuleSansEmail(t *testing.T) {
 	setNotifier(n)
 
 	// Job entierement annule : JobFinished ne fait rien.
-	n.JobFinished("org-x", "job-s31-d", 0, 0, 3, 0)
+	n.JobFinished("org-x", "job-s31-d", 0, 0, 3, 0, nil)
 	if len(n.Deliveries()) != 0 {
 		t.Fatalf("un job annule ne doit pas declencher d e-mail, %d recues", len(n.Deliveries()))
 	}

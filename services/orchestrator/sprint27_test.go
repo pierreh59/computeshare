@@ -16,7 +16,7 @@ func TestSoumissionAssetEtranger(t *testing.T) {
 	defer os.Unsetenv("ASSETS_DIR")
 
 	reg, chunker := newTestDash(t)
-	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a", false, false)
+	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a", false, true) // sprint 39 : jobs tous GPU
 	store := NewStore()
 	assets := NewAssetStore(store)
 	orgs := NewOrgStore(store)
@@ -69,7 +69,7 @@ func TestManifestEmbarqueDansChunk(t *testing.T) {
 	defer os.Unsetenv("ASSETS_DIR")
 
 	reg, chunker := newTestDash(t)
-	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a", false, false)
+	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a", false, true) // sprint 39 : jobs tous GPU
 	store := NewStore()
 	assets := NewAssetStore(store)
 	orgs := NewOrgStore(store)
@@ -114,7 +114,7 @@ func TestNodeDownloadAsset(t *testing.T) {
 	defer os.Unsetenv("ASSETS_DIR")
 
 	reg, chunker := newTestDash(t)
-	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a", false, false)
+	reg.Register("node-a", "GPU A", "prosumer", "europe", "fp-a", false, true) // sprint 39 : jobs tous GPU
 	store := NewStore()
 	assets := NewAssetStore(store)
 	orgs := NewOrgStore(store)

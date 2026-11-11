@@ -15,6 +15,9 @@ package main
 // prevue si le volume devient le facteur limitant.
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,6 +25,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -194,24 +198,28 @@ func downloadResult(orgs *OrgStore, c *Chunker, store *Store) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		org := orgs.Authenticate(r)
-		if org == nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
 		chunkID := strings.TrimPrefix(r.URL.Path, "/v1/results/")
 		if chunkID == "" || strings.Contains(chunkID, "/") {
 			http.NotFound(w, r)
 			return
 		}
-		// Droit d'acces : le chunk appartient a l'organisation.
+		org := orgs.Authenticate(r)
 		var fileName string
 		allowed := false
-		if ch := c.ChunkByID(chunkID); ch != nil {
-			allowed = ch.OrgID == org.ID
-			fileName = ch.ExpectedOutput
+		if org != nil {
+			// Droit d'acces : le chunk appartient a l'organisation.
+			if ch := c.ChunkByID(chunkID); ch != nil {
+				allowed = ch.OrgID == org.ID
+				fileName = ch.ExpectedOutput
+			}
+		} else if validResultToken(chunkID, r.URL.Query().Get("t")) {
+			// Sprint 39 : lien signe (e-mail job termine), valable 7 j.
+			allowed = true
+			if ch := c.ChunkByID(chunkID); ch != nil {
+				fileName = ch.ExpectedOutput
+			}
 		}
-		if !allowed {
+		if !allowed && org != nil {
 			if row := store.LoadResult(chunkID); row != nil {
 				allowed = row.OrgID == org.ID
 				if fileName == "" {
@@ -220,9 +228,14 @@ func downloadResult(orgs *OrgStore, c *Chunker, store *Store) http.HandlerFunc {
 			}
 		}
 		if !allowed {
-			http.NotFound(w, r) // pas de fuite d'information
+			if org == nil {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+			} else {
+				http.NotFound(w, r) // pas de fuite d'information
+			}
 			return
 		}
+
 		path := resultPath(chunkID)
 		if _, err := os.Stat(path); err != nil {
 			http.Error(w, "resultat pas encore disponible", http.StatusNotFound)
@@ -295,5 +308,122 @@ func reportUploadNote() http.HandlerFunc {
 		}
 		dashLog("result_upload", msg)
 		writeJSON(w, map[string]bool{"recorded": true})
+	}
+}
+
+// ------------------------------------------------------------------
+// Sprint 39 : liens de telechargement signes (e-mail job termine) et
+// route admin. Un e-mail ne peut pas porter d'en-tete Authorization :
+// les liens de telechargement embarquent un jeton HMAC signe par le
+// serveur (SESSION_SECRET ou ADMIN_KEY derive), valable 7 jours.
+
+const resultLinkTTL = 7 * 24 * time.Hour
+
+// downloadSecret : cle de signature des liens (jamais exposee).
+func downloadSecret() []byte {
+	b := os.Getenv("SESSION_SECRET")
+	if b == "" {
+		b = os.Getenv("ADMIN_KEY")
+	}
+	if b == "" {
+		b = "dev-download-secret"
+	}
+	h := sha256.Sum256([]byte(b))
+	return h[:]
+}
+
+// resultDownloadToken : "<expiration unix>.<hmac>" pour un chunk.
+func resultDownloadToken(chunkID string, exp time.Time) string {
+	e := strconv.FormatInt(exp.Unix(), 10)
+	mac := hmac.New(sha256.New, downloadSecret())
+	mac.Write([]byte("dl|" + chunkID + "|" + e))
+	return e + "." + hex.EncodeToString(mac.Sum(nil))
+}
+
+// ResultLink : un lien de telechargement prete a inserrer dans un
+// e-mail (Sprint 39).
+type ResultLink struct {
+	ChunkID  string
+	FileName string
+	URL      string
+}
+
+// validResultToken : signature correcte et lien non expire.
+func validResultToken(chunkID, token string) bool {
+	parts := strings.SplitN(token, ".", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	exp, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || time.Now().Unix() > exp {
+		return false
+	}
+	mac := hmac.New(sha256.New, downloadSecret())
+	mac.Write([]byte("dl|" + chunkID + "|" + parts[0]))
+	return hmac.Equal([]byte(parts[1]), []byte(hex.EncodeToString(mac.Sum(nil))))
+}
+
+// BuildResultLinks : liens signes (7 jours) pour les chunks done d un
+// job, avec le nom de fichier attendu.
+func BuildResultLinks(baseURL string, chunks []Chunk) []ResultLink {
+	exp := time.Now().Add(resultLinkTTL)
+	var out []ResultLink
+	for _, ch := range chunks {
+		if ch.Status != "done" {
+			continue
+		}
+		name := ch.ExpectedOutput
+		if name == "" {
+			name = "result.bin"
+		}
+		out = append(out, ResultLink{
+			ChunkID:  ch.ID,
+			FileName: name,
+			URL:      baseURL + "/v1/results/" + ch.ID + "?t=" + resultDownloadToken(ch.ID, exp),
+		})
+	}
+	return out
+}
+
+// GET /admin/dash/result/<chunk_id> : telechargement d'un resultat
+// par l'admin (Sprint 39). La cle est acceptee en en-tete X-Admin-Key
+// ou en parametre ?key= (lien simple dans le dashboard).
+func adminDownloadResult(c *Chunker, store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		key := r.Header.Get("X-Admin-Key")
+		if key == "" {
+			key = r.URL.Query().Get("key")
+		}
+		r2 := &http.Request{Header: http.Header{"X-Admin-Key": []string{key}}}
+		if !requireAdmin(r2) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		chunkID := strings.TrimPrefix(r.URL.Path, "/admin/dash/result/")
+		if chunkID == "" || strings.Contains(chunkID, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		var fileName string
+		if ch := c.ChunkByID(chunkID); ch != nil {
+			fileName = ch.ExpectedOutput
+		}
+		if fileName == "" {
+			if row := store.LoadResult(chunkID); row != nil {
+				fileName = row.FileName
+			}
+		}
+		path := resultPath(chunkID)
+		if _, err := os.Stat(path); err != nil {
+			http.Error(w, "resultat plus disponible (purge 30 jours ou jamais de posse)", http.StatusNotFound)
+			return
+		}
+		if fileName == "" {
+			fileName = "result.bin"
+		}
+		w.Header().Set("Content-Disposition",
+			`attachment; filename="`+fileName+`"`)
+		w.Header().Set("Content-Type", "application/octet-stream")
+		http.ServeFile(w, r, path)
 	}
 }

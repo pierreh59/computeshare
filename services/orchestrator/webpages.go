@@ -608,7 +608,8 @@ const meHTML = `<!DOCTYPE html>
  <label>Nombre de tâches</label><input id="count" value="1">
  <label>Nom du fichier résultat (ex: out.mp4)</label><input id="outname" value="out.mp4">
  <label>Délai maximum par tâche (secondes)</label><input id="tmo" value="600">
- <label style="margin-top:8px;font-weight:normal"><input type="checkbox" id="gpu" style="width:auto"> Utiliser une carte graphique (job GPU, plus rapide pour les modèles IA)</label>
+ <p style="margin-top:8px" class="muted">&#9971; Tous les jobs ComputeShare sont exécutés sur carte graphique (GPU) : plus rapide pour les modèles IA.</p>
+ <input type="hidden" id="gpu" value="1">
  <div id="assetRow" style="display:none">
   <h2 style="margin-top:18px">Fichiers d'entrée (optionnel)</h2>
   <p class="muted">Téléversez vos fichiers ici : ils seront placés dans /work du conteneur sous leur nom exact (100 Mo max par fichier). Ils sont supprimés du PC du fournisseur à la fin du job.</p>
@@ -705,27 +706,27 @@ var MODELES=[
   args:function(noms){return ['-c',document.getElementById('tpl-script-upscale').textContent.trim(),noms.photo,noms._sortie];}},
  {id:'video-mp4',icone:'🎬',titre:'Convertir une vidéo en MP4 (H.264)',
   desc:'Encode votre vidéo en MP4 H.264/AAC, compatible partout (web, réseaux sociaux, téléphones). Formats acceptés en entrée : MP4, MOV, MKV, AVI, WEBM...',
-  gpu:false,image:'jrottenberg/ffmpeg:6-alpine',cmd:'-i',outname:'video.mp4',tmo:1800,
+  gpu:true,image:'jrottenberg/ffmpeg:6-alpine',cmd:'-i',outname:'video.mp4',tmo:1800,
   entrees:[{role:'video',lib:'votre vidéo'}],
   args:function(noms){return [noms.video,'-c:v','libx264','-preset','medium','-crf','23','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k',noms._sortie];}},
  {id:'video-compacter',icone:'🗜️',titre:'Compacter une vidéo (gain de place)',
   desc:'Ré-encode votre vidéo pour réduire fortement sa taille, en gardant une bonne qualité. Utile pour archiver ou partager.',
-  gpu:false,image:'jrottenberg/ffmpeg:6-alpine',cmd:'-i',outname:'video-petite.mp4',tmo:1800,
+  gpu:true,image:'jrottenberg/ffmpeg:6-alpine',cmd:'-i',outname:'video-petite.mp4',tmo:1800,
   entrees:[{role:'video',lib:'votre vidéo'}],
   args:function(noms){return [noms.video,'-c:v','libx264','-preset','fast','-crf','28','-c:a','aac','-b:a','96k',noms._sortie];}},
  {id:'vignette',icone:'🖼️',titre:'Créer une vignette d\'une vidéo',
   desc:'Extrait une image (PNG) de votre vidéo à un moment choisi, par défaut à 5 secondes. Parfait pour une miniature de site ou de player.',
-  gpu:false,image:'jrottenberg/ffmpeg:6-alpine',cmd:'-ss',outname:'vignette.png',tmo:600,
+  gpu:true,image:'jrottenberg/ffmpeg:6-alpine',cmd:'-ss',outname:'vignette.png',tmo:600,
   entrees:[{role:'video',lib:'votre vidéo'}],
   args:function(noms){return ['00:00:05','-i',noms.video,'-frames:v','1',noms._sortie];}},
  {id:'audio-mp3',icone:'🎵',titre:'Extraire l\'audio d\'une vidéo (MP3)',
   desc:'Récupère la bande son de votre vidéo en MP3 (qualité très bonne).',
-  gpu:false,image:'jrottenberg/ffmpeg:6-alpine',cmd:'-i',outname:'audio.mp3',tmo:600,
+  gpu:true,image:'jrottenberg/ffmpeg:6-alpine',cmd:'-i',outname:'audio.mp3',tmo:600,
   entrees:[{role:'video',lib:'votre vidéo'}],
   args:function(noms){return [noms.video,'-vn','-c:a','libmp3lame','-q:a','2',noms._sortie];}},
  {id:'photo-lanczos',icone:'🔍',titre:'Agrandir une photo ×4 (simple, sans IA)',
   desc:'Agrandissement classique Lanczos, rapide et très bon marché. La netteté n\'est pas restaurée par IA (préférez le modèle IA pour un meilleur rendu).',
-  gpu:false,image:'jrottenberg/ffmpeg:6-alpine',cmd:'-i',outname:'photo-x4.png',tmo:600,
+  gpu:true,image:'jrottenberg/ffmpeg:6-alpine',cmd:'-i',outname:'photo-x4.png',tmo:600,
   entrees:[{role:'photo',lib:'votre photo (PNG ou JPG)'}],
   args:function(noms){return [noms.photo,'-vf','scale=iw*4:ih*4:flags=lanczos',noms._sortie];}}
 ];
@@ -797,7 +798,7 @@ function preparerModele(){
  document.getElementById('count').value='1';
  document.getElementById('outname').value=m.outname;
  document.getElementById('tmo').value=String(m.tmo);
- document.getElementById('gpu').checked=!!m.gpu;
+
  document.getElementById('jid').value=m.id+'-'+Math.random().toString(36).slice(2,8);
  document.getElementById('imgRow').style.display='block';
  document.getElementById('assetRow').style.display='block';
@@ -871,7 +872,8 @@ function submitJob(){
   if(mesAssets.length){body.asset_ids=mesAssets.map(function(a){return a.asset_id;});}}
   // Sprint 34 : job GPU si la case est cochee (perdue lors du relooking
   // sprint 23, vue en vrai : le job GPU de Pierre tournait sur CPU -> timeout).
-  if(document.getElementById('gpu').checked){body.gpu=true;}
+  // Sprint 39 : tous les jobs sont GPU, le serveur force egalement job.Gpu.
+  body.gpu=true;
  api('/v1/jobs',{method:'POST',body:JSON.stringify(body)}).then(function(r){
   document.getElementById('msg').innerHTML='<p class="ok">Job '+esc(r.job_id)+' soumis ('+r.task_count+' tâches).</p>';
   document.getElementById('jid').value='';

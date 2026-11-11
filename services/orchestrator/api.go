@@ -38,6 +38,12 @@ func v1Submit(orgs *OrgStore, assets *AssetStore, c *Chunker, b *Billing, accoun
 			http.Error(w, "invalid job", http.StatusBadRequest)
 			return
 		}
+		// Sprint 39 (decision produit, 11 nov.) : TOUS les jobs
+		// passent en GPU. Le champ gpu du client est ignore, le job
+		// part uniquement vers un noeud gpu_ready et est facture au
+		// tarif GPU. Un 503 "no gpu-capable node available" survient
+		// s'il n'y a aucun noeud GPU en ligne.
+		job.Gpu = true
 		// Sprint 18 (v2) : validation du runtime conteneur.
 		if job.Runtime == "" {
 			job.Runtime = "allowlist"
