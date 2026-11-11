@@ -116,10 +116,15 @@ fn working_cell() -> &'static Mutex<Option<WorkInfo>> {
     CELL.get_or_init(|| Mutex::new(None))
 }
 
+/// Sprint 36 : meme logique tolerant au poison que lock_status.
+fn lock_working() -> std::sync::MutexGuard<'static, Option<WorkInfo>> {
+    working_cell().lock().unwrap_or_else(|p| p.into_inner())
+}
+
 /// Sprint 36 : debut de tache, echeance initiale couvrant la phase
 /// d'assets puis celle de calcul.
 fn working_begin(chunk_id: &str, echeance_secs: u64) {
-    *working_cell().lock() = Some(WorkInfo {
+    *lock_working() = Some(WorkInfo {
         chunk_id: chunk_id.to_string(),
         deadline: std::time::Instant::now() + Duration::from_secs(echeance_secs),
     });
@@ -127,14 +132,14 @@ fn working_begin(chunk_id: &str, echeance_secs: u64) {
 
 /// Sprint 36 : nouvelle echeance (changement de phase).
 fn working_echeance(secs: u64) {
-    if let Some(w) = working_cell().lock().as_mut() {
+    if let Some(w) = lock_working().as_mut() {
         w.deadline = std::time::Instant::now() + Duration::from_secs(secs);
     }
 }
 
 /// Sprint 36 : fin de tache (normale OU apres panic interceptee).
 fn working_end() {
-    *working_cell().lock() = None;
+    *lock_working() = None;
 }
 
 /// Sprint 36 : message lisible d'une charge de panic recuperee par
@@ -160,7 +165,7 @@ fn watchdog_loop() {
     loop {
         std::thread::sleep(Duration::from_secs(30));
         let bloquee: Option<String> = {
-            let w = working_cell().lock();
+            let w = lock_working();
             match w.as_ref() {
                 Some(info) if std::time::Instant::now() > info.deadline => {
                     Some(info.chunk_id.clone())
@@ -192,7 +197,7 @@ fn watchdog_loop() {
         ));
         // Re verifier dans 10 min si le fil reste bloque, sans toucher
         // a l'etat working (le fil de poll en reste maitre).
-        let w = working_cell().lock();
+        let w = lock_working();
         if let Some(info) = w.as_mut() {
             info.deadline = std::time::Instant::now() + Duration::from_secs(600);
         }
@@ -693,14 +698,14 @@ mod tests {
     fn working_cell_cycle_complet() {
         working_begin("chunk-test", 60);
         {
-            let w = working_cell().lock();
+            let w = lock_working();
             let info = w.as_ref().expect("workinfo attendu");
             assert_eq!(info.chunk_id, "chunk-test");
             assert!(info.deadline > std::time::Instant::now());
         }
         working_echeance(600);
         {
-            let w = working_cell().lock();
+            let w = lock_working();
             let info = w.as_ref().expect("workinfo attendu");
             assert!(
                 info.deadline > std::time::Instant::now() + Duration::from_secs(500),
@@ -708,7 +713,7 @@ mod tests {
             );
         }
         working_end();
-        assert!(working_cell().lock().is_none());
+        assert!(lock_working().is_none());
     }
 
     /// Sprint 36 : message lisible d'une charge de panic recuperee par
