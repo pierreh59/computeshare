@@ -31,13 +31,19 @@ jobs:
           --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      # Pas d'apt-get ici : le 11 nov. 2026, deux runs CI ont echoue parce
+      # que le runner ne resolvait plus les miroirs Ubuntu ("Temporary
+      # failure resolving"). On applique les migrations avec le client psql
+      # de l'image postgres:16-alpine, deja telechargee pour le service :
+      # aucun telechargement externe, immunise contre les pannes apt.
       - name: Appliquer toutes les migrations dans l'ordre
         run: |
           set -e
           for f in db/migrations/*.sql; do
             echo "== $f"
-            PGPASSWORD=ci psql -h localhost -U ci -d ci -v ON_ERROR_STOP=1 -f "$f"
+            docker run --rm --network host -e PGPASSWORD=ci \
+              -v "$PWD/db:/db:ro" postgres:16-alpine \
+              psql -h localhost -U ci -d ci -v ON_ERROR_STOP=1 -f "/db/migrations/${f##*/}"
           done
 
   # L'app desktop Tauri doit compiler depuis le depot : le code Rust des
