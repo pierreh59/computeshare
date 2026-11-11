@@ -197,7 +197,7 @@ fn watchdog_loop() {
         ));
         // Re verifier dans 10 min si le fil reste bloque, sans toucher
         // a l'etat working (le fil de poll en reste maitre).
-        let w = lock_working();
+        let mut w = lock_working();
         if let Some(info) = w.as_mut() {
             info.deadline = std::time::Instant::now() + Duration::from_secs(600);
         }
