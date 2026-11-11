@@ -12,7 +12,7 @@ import (
 
 // orchestratorVersion : version de l'orchestrateur, affichee sur le
 // dashboard admin et dans /healthz. A incrementer a chaque sprint.
-const orchestratorVersion = "v0.32.0"
+const orchestratorVersion = "v0.33.0"
 
 func main() {
 	port := os.Getenv("PORT")
@@ -385,7 +385,7 @@ func main() {
 		case strings.HasSuffix(r.URL.Path, "/status"):
 			v1Status(orgs, chunker, billing).ServeHTTP(w, r)
 		case strings.HasSuffix(r.URL.Path, "/results"):
-			v1Results(orgs, chunker).ServeHTTP(w, r)
+			v1Results(orgs, chunker, store).ServeHTTP(w, r)
 		case strings.HasSuffix(r.URL.Path, "/cancel"):
 			v1Cancel(orgs, chunker).ServeHTTP(w, r)
 		default:

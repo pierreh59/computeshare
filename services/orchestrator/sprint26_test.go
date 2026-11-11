@@ -182,7 +182,7 @@ func TestV1ResultsAnnonceDownload(t *testing.T) {
 	chunker.Complete(ch.ID, "node-a", "ok", "sha", "", 1, 0, 0)
 	os.WriteFile(resultPath(ch.ID), []byte("data"), 0o644)
 
-	h := v1Results(orgs, chunker)
+	h := v1Results(orgs, chunker, NewStore())
 	req := httptest.NewRequest("GET", "/v1/jobs/job-s26d/results", nil)
 	req.Header.Set("Authorization", "Bearer "+key)
 	rec := httptest.NewRecorder()

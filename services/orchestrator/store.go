@@ -612,11 +612,11 @@ func (s *Store) LoadAll(reg *Registry, pricing *Pricing, chunker *Chunker, orgs 
 					Attempts:        attempts,
 					Zone:            zone.String,
 					AssetIDs:        assets,
-						// Sprint 35 : le chunk recharge reste un job conteneur
-						// identique (image + gpu conserves).
-						Runtime:         runtime,
-						Image:           image,
-						Gpu:             gpu,
+					// Sprint 35 : le chunk recharge reste un job conteneur
+					// identique (image + gpu conserves).
+					Runtime: runtime,
+					Image:   image,
+					Gpu:     gpu,
 				})
 			}
 		}
@@ -899,6 +899,9 @@ type ResultRow struct {
 	FileName string
 	Size     int64
 	SHA256   string
+	// Sprint 39b : date d enregistrement, sert a calculer la fin de
+	// dispo du fichier (purge 30 jours).
+	CreatedAt time.Time
 }
 
 // SaveResult enregistre les metadonnees d'un fichier de resultat.
@@ -927,13 +930,39 @@ func (s *Store) LoadResult(chunkID string) *ResultRow {
 	}
 	var r ResultRow
 	err := s.db.QueryRow(`SELECT chunk_id, job_id, org_id,
-		COALESCE(file_name, 'result.bin'), size_bytes, COALESCE(sha256, '')
+		COALESCE(file_name, 'result.bin'), size_bytes, COALESCE(sha256, ''), created_at
 		FROM runtime_results WHERE chunk_id = $1`, chunkID).
-		Scan(&r.ChunkID, &r.JobID, &r.OrgID, &r.FileName, &r.Size, &r.SHA256)
+		Scan(&r.ChunkID, &r.JobID, &r.OrgID, &r.FileName, &r.Size, &r.SHA256, &r.CreatedAt)
 	if err != nil {
 		return nil
 	}
 	return &r
+}
+
+// LoadJobResults (Sprint 39b) : resultats persistes d un job d une
+// organisation, les plus recents d abord. Sert de repli quand les
+// chunks ne sont plus en memoire (apres un redemarrage).
+func (s *Store) LoadJobResults(jobID, orgID string) []ResultRow {
+	if !s.enabled() {
+		return nil
+	}
+	rows, err := s.db.Query(`SELECT chunk_id, job_id, org_id,
+		COALESCE(file_name, 'result.bin'), size_bytes, COALESCE(sha256, ''), created_at
+		FROM runtime_results WHERE job_id = $1 AND org_id = $2
+		ORDER BY created_at DESC`, jobID, orgID)
+	if err != nil {
+		log.Printf("store.LoadJobResults: %v", err)
+		return nil
+	}
+	defer rows.Close()
+	out := []ResultRow{}
+	for rows.Next() {
+		var r ResultRow
+		if rows.Scan(&r.ChunkID, &r.JobID, &r.OrgID, &r.FileName, &r.Size, &r.SHA256, &r.CreatedAt) == nil {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // PurgeOldResults supprime les resultats plus vieux que la retention

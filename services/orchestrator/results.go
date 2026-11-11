@@ -191,6 +191,20 @@ func resultFileInfo(chunkID string) int64 {
 	return st.Size()
 }
 
+// resultAvailableUntil : date a laquelle le fichier resultat sera
+// purge (retention 30 jours). Base : heure de fin du chunk si connue,
+// sinon date de modification du fichier sur le disque.
+func resultAvailableUntil(base time.Time, chunkID string) string {
+	if base.IsZero() {
+		st, err := os.Stat(resultPath(chunkID))
+		if err != nil {
+			return ""
+		}
+		base = st.ModTime()
+	}
+	return base.Add(resultRetention).Format("02/01/2006")
+}
+
 // GET /v1/results/<chunk_id> : le client telecharge son fichier.
 func downloadResult(orgs *OrgStore, c *Chunker, store *Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

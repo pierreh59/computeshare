@@ -916,9 +916,18 @@ function cancelJob(id){
 }
 function showResults(id){
  api('/v1/jobs/'+encodeURIComponent(id)+'/results').then(function(chunks){
-  var h='<table>';
+  // Sprint 39b : colonne de telechargement avec jeton signe (7 jours)
+  // et date de fin de dispo du fichier (purge 30 jours).
+  var h='<table><tr><th>Fichier</th><th>Statut</th><th>SHA-256</th><th>Télécharger</th></tr>';
   (chunks||[]).forEach(function(c){
-   h+='<tr><td>'+esc(c.id)+'</td><td class="'+(c.status==='done'?'ok':'err')+'">'+esc(c.status)+'</td><td style="font-size:12px;word-break:break-all">'+esc(c.result_sha256||'')+'</td></tr>';
+   var dl='';
+   if(c.download_token){
+    dl='<a href="/v1/results/'+encodeURIComponent(c.chunk_id)+'?t='+encodeURIComponent(c.download_token)+'" target="_blank" style="background:linear-gradient(135deg,var(--acc),#6366f1);color:#fff;padding:6px 12px;border-radius:8px;text-decoration:none;font-size:13px">&#11015; Télécharger</a>';
+    if(c.available_until){dl+='<div class="muted" style="font-size:12px;margin-top:4px">disponible jusqu&#39;au '+esc(c.available_until)+'</div>';}
+   }else if(c.status==='done'){
+    dl='<span class="muted" style="font-size:12px">fichier expiré</span>';
+   }
+   h+='<tr><td>'+esc(c.file||c.chunk_id)+'</td><td class="'+(c.status==='done'?'ok':'err')+'">'+esc(c.status)+'</td><td style="font-size:12px;word-break:break-all">'+esc(c.result_sha256||'')+'</td><td>'+dl+'</td></tr>';
   });
   document.getElementById('res-'+id).innerHTML=h+'</table>';
  }).catch(function(e){document.getElementById('res-'+id).textContent=e.message;});

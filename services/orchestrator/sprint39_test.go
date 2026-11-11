@@ -197,3 +197,63 @@ func TestBuildResultLinksEtRecentResults(t *testing.T) {
 		t.Fatalf("DashRecentResults inattendu : %v (json %s)", rr, func() string { b, _ := json.Marshal(rr); return string(b) }())
 	}
 }
+
+// Sprint 39b : la console client recupere un jeton signe + la date de
+// fin de dispo depuis /v1/jobs/<id>/results, et telecharge sans session.
+func TestClientResultsLien(t *testing.T) {
+	os.Setenv("DATABASE_URL", "")
+	os.Setenv("RESULTS_DIR", t.TempDir())
+	defer os.Unsetenv("RESULTS_DIR")
+
+	reg, chunker := newTestDash(t)
+	reg.Register("node-a39b", "GPU A", "prosumer", "europe", "fp-a", false, true)
+	store := NewStore()
+	orgs := NewOrgStore(store)
+	org, key, _ := orgs.CreateOrg("Org S39b")
+
+	job := Job{ID: "job-s39b", Command: "echo", TaskCount: 1, Gpu: true, OutputName: "out-s39b.txt"}
+	if chunker.Submit(job, org.ID) == nil {
+		t.Fatal("soumission refusee")
+	}
+	ch := chunker.NextFor("node-a39b")
+	if ch == nil {
+		t.Fatal("chunk non livre")
+	}
+	if !chunker.Complete(ch.ID, "node-a39b", "ok", "sha-s39b", "", 1, 0, 0) {
+		t.Fatal("complete refuse")
+	}
+	if err := os.WriteFile(resultPath(ch.ID), []byte("donnees-s39b"), 0o644); err != nil {
+		t.Fatalf("ecriture resultat : %v", err)
+	}
+
+	// Reponse authentifiee : jeton + date de fin de dispo.
+	h := v1Results(orgs, chunker, store)
+	req := httptest.NewRequest("GET", "/v1/jobs/job-s39b/results", nil)
+	req.Header.Set("Authorization", "Bearer "+key)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	var rows []map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &rows)
+	if len(rows) != 1 {
+		t.Fatalf("1 ligne attendue : %s", rec.Body.String())
+	}
+	tok, _ := rows[0]["download_token"].(string)
+	if tok == "" {
+		t.Fatalf("download_token absent : %s", rec.Body.String())
+	}
+	if rows[0]["file"] != "out-s39b.txt" || rows[0]["status"] != "done" {
+		t.Fatalf("file/status absents : %s", rec.Body.String())
+	}
+	until, _ := rows[0]["available_until"].(string)
+	if want := time.Now().Add(resultRetention).Format("02/01/2006"); until != want {
+		t.Fatalf("available_until = %q, attendu %q", until, want)
+	}
+
+	// Le lien du jeton telecharge SANS session (clic direct console).
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest("GET", "/v1/results/"+ch.ID+"?t="+tok, nil)
+	downloadResult(orgs, chunker, store).ServeHTTP(rec2, req2)
+	if rec2.Code != 200 || rec2.Body.String() != "donnees-s39b" {
+		t.Fatalf("telechargement par lien console attendu 200 : HTTP %d %q", rec2.Code, rec2.Body.String())
+	}
+}

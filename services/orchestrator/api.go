@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // POST /v1/jobs : soumet un job, decoupe en chunks par le chunker.
@@ -192,9 +193,14 @@ func v1Status(orgs *OrgStore, c *Chunker, b *Billing) http.HandlerFunc {
 }
 
 // GET /v1/jobs/<id>/results : chunks termines (checksums inclus).
-func v1Results(orgs *OrgStore, c *Chunker) http.HandlerFunc {
+// Sprint 39b (retour Pierre) : chaque chunk termine dont le fichier
+// existe emporte un jeton de telechargement signe (clic direct dans
+// la console client, valable 7 jours) et la date de fin de dispo du
+// fichier (purge 30 jours).
+func v1Results(orgs *OrgStore, c *Chunker, store *Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if orgs.Authenticate(r) == nil {
+		org := orgs.Authenticate(r)
+		if org == nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -210,14 +216,38 @@ func v1Results(orgs *OrgStore, c *Chunker) http.HandlerFunc {
 			row := map[string]interface{}{
 				"chunk_id":      ch.ID,
 				"node_id":       ch.NodeID,
+				"status":        ch.Status,
+				"file":          ch.ExpectedOutput,
 				"result_sha256": ch.ResultSHA256,
 				"duration_secs": ch.DurationSecs,
 			}
 			if size := resultFileInfo(ch.ID); size > 0 {
 				row["download_url"] = "/v1/results/" + ch.ID
+				row["download_token"] = resultDownloadToken(ch.ID, time.Now().Add(resultLinkTTL))
 				row["size_bytes"] = size
+				row["available_until"] = resultAvailableUntil(ch.UpdatedAt, ch.ID)
 			}
 			out = append(out, row)
+		}
+		// Sprint 39b : apres un redemarrage les chunks ne sont plus
+		// en memoire -> repli sur les resultats persistes (verifies
+		// contre l organisation pour ne rien fuiter).
+		if len(out) == 0 {
+			for _, rr := range store.LoadJobResults(jobID, org.ID) {
+				row := map[string]interface{}{
+					"chunk_id":      rr.ChunkID,
+					"status":        "done",
+					"file":          rr.FileName,
+					"result_sha256": rr.SHA256,
+				}
+				if size := resultFileInfo(rr.ChunkID); size > 0 {
+					row["download_url"] = "/v1/results/" + rr.ChunkID
+					row["download_token"] = resultDownloadToken(rr.ChunkID, time.Now().Add(resultLinkTTL))
+					row["size_bytes"] = size
+					row["available_until"] = resultAvailableUntil(rr.CreatedAt, rr.ChunkID)
+				}
+				out = append(out, row)
+			}
 		}
 		writeJSON(w, out)
 	}
